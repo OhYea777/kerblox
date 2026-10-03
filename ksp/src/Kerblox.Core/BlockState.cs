@@ -138,6 +138,9 @@ namespace Kerblox.Core
                 }
             }
 
+            // Matches Minecraft, whose air block defines no properties.
+            if (name == AirName && props.Count > 0) return "air has no properties";
+
             if (props.Count == 0)
             {
                 state = name == AirName ? Air : new BlockState(name, name.Length);

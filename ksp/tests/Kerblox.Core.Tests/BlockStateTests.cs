@@ -65,6 +65,8 @@ public class BlockStateTests
     [InlineData("minecraft:stone[a=1,]")]
     [InlineData("minecraft:stone[a=1 ]")]
     [InlineData("a:b:c")]
+    [InlineData("minecraft:air[waterlogged=true]")]
+    [InlineData("air[a=1]")]
     public void RejectsMalformed(string text)
     {
         Assert.Throws<FormatException>(() => BlockState.Parse(text));

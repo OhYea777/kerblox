@@ -179,6 +179,9 @@ public class GridCodecTests
     [InlineData(3, "minecraft:air", "minecraft:stone", "stone", 2, 1)]        // duplicate after canonicalising
     [InlineData(2, "minecraft:air", "minecraft:air", 2, 1)]                   // air twice
     [InlineData(2, "minecraft:air", "Bad Name", 2, 1)]                        // not a block state
+    [InlineData(2, "minecraft:air", "minecraft:stone", 0x82, 0x80, 0x80, 0x80, 0x10, 0)] // run varint overflows 32 bits (2 + 2^32)
+    [InlineData(2, "minecraft:air", "minecraft:stone", 2, 0x80, 0x80, 0x80, 0x80, 0x80, 0)] // index varint longer than 5 bytes
+    [InlineData(0x80, 0x80, 0x80, 0x80, 0x20)]                                // palette count overflows 32 bits
     public void RejectsBadV2(params object[] parts) =>
         Assert.Throws<FormatException>(() => GridCodec.FromBytes(V2(parts)));
 }

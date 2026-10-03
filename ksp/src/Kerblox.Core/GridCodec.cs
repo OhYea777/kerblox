@@ -218,6 +218,9 @@ namespace Kerblox.Core
             for (int shift = 0; shift < 35; shift += 7)
             {
                 byte b = r.ReadByte();
+                // The fifth byte has room for only 4 more bits of a u32.
+                if (shift == 28 && (b & 0xF0) != 0)
+                    throw new FormatException("Varint overflows 32 bits");
                 result |= (uint)(b & 0x7F) << shift;
                 if ((b & 0x80) == 0) return result;
             }
