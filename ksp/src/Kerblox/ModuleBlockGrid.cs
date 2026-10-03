@@ -224,6 +224,36 @@ namespace Kerblox
 
         #endregion
 
+        #region Build mode
+
+        private const string BuildModeOff = "Build blocks";
+        private const string BuildModeOn = "Stop building";
+
+        /// <summary>PAW toggle for the editor's block placement tool (<see cref="BlockBuildMode"/>).</summary>
+        [KSPEvent(guiActive = false, guiActiveEditor = true, guiName = BuildModeOff)]
+        public void ToggleBuildMode()
+        {
+            if (BlockBuildMode.IsActiveOn(this)) BlockBuildMode.Active.Close();
+            else BlockBuildMode.Open(this);
+        }
+
+        internal void OnBuildModeChanged(bool active) =>
+            Events[nameof(ToggleBuildMode)].guiName = active ? BuildModeOn : BuildModeOff;
+
+        /// <summary>The transform whose local space <see cref="BlockLayout"/> describes; null before the first build.</summary>
+        internal Transform GridRoot => GetModelTransform().Find(GeneratedRootName);
+
+        /// <summary>Fills <paramref name="into"/> with the current merged box colliders.</summary>
+        internal void GetGridColliders(List<BoxCollider> into)
+        {
+            into.Clear();
+            Transform root = GridRoot;
+            Transform holder = root == null ? null : root.Find(CollidersName);
+            if (holder != null) holder.GetComponentsInChildren(into);
+        }
+
+        #endregion
+
         #region Model
 
         private Transform GetModelTransform()

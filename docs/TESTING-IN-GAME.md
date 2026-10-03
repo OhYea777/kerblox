@@ -64,6 +64,29 @@ Add an engine and a probe core (or pod), then launch.
 | CoM in flight | Same behaviour as in the VAB. A side-mounted engine produces the torque you'd expect from a low CoM. |
 | Revert to launch, and quicksave/quickload (F5/F9) | The part rebuilds identically. |
 
+## P2.3: Block placement tool
+
+In the VAB, with the grid part placed as the root:
+
+| Check | Expected |
+| --- | --- |
+| Right-click the part (PAW) | A **Build blocks** button. Clicking it opens a **Kerblox blocks** window listing stone, oak planks, iron block, glass and white wool, and the button now reads **Stop building**. The editor switches to place mode. |
+| Hover the part | A translucent green cube shows where a block would go, on the face under the mouse. Holding Shift turns it red over the block that would be removed; Ctrl turns it blue. |
+| Left click on a face | A block of the selected type appears there. PAW Blocks and Block mass go up; the Engineer's Report mass follows. |
+| Left click on the outer face of the top, bottom or a side | The grid grows to take the block (log: `[Kerblox] Grid on ... resized`). The rest of the grid shifts by half a block in part space; that's expected until P2.2. |
+| Shift+left click a block | It disappears. Removing the last block is refused with a message in the window. |
+| Ctrl+left click a block | That block becomes the selected type (shown as "Picked: ..." if it isn't in the list). |
+| Pick a block in the window, then place | The new type is placed. Clicks on the window itself never place blocks. |
+| Left click on another part, or on the grid part, while building | The part is **not** picked up. Keys 2/3/4 (offset/rotate/root) do nothing; Delete does nothing; Ctrl+Z does nothing. |
+| Camera while building | Right-drag orbits, scroll zooms, middle-drag pans, exactly as normal. No left click moves the camera. |
+| Build behind another part | Blocks hidden behind another part can still be targeted (only the grid's own colliders are raycast). |
+| **Stop building** (PAW) or **Done** (window) | The window and ghost disappear. Part pickup, gizmo tools and undo work again. One Ctrl+Z undoes the whole build session (stock undo snapshot taken on exit). |
+| Start building, then exit to the Space Center | No stuck input locks: in the next VAB visit, parts pick up normally. The log shows `[Kerblox] Build mode off` before the scene change. |
+| Build mode on one grid part, then **Build blocks** on a second one | The first one's session ends; only the second is edited. |
+| Save, reload the craft | The edited shape and numbers survive. |
+
+Log lines: `[Kerblox] Build mode on for kerbloxBlockGrid` and `[Kerblox] Build mode off`.
+
 ## 5. Logs
 
 | Log | Where | What it contains |

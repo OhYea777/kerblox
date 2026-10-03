@@ -138,7 +138,7 @@ Goal: place and remove blocks on the grid part inside the VAB/SPH.
 - **Acceptance:** extending a grid upward in the VAB carries the parts above it.
 
 ### P2.3: Editor block placement tool
-- **Status:** todo
+- **Status:** done
 - **Depends on:** P2.1
 - **Gate:** in-game
 - **Scope:** a build mode toggled from the part's PAW. Raycast against the
