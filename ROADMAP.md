@@ -81,7 +81,7 @@ with correct mass, CoM and drag.
   the cfg changes part mass in the VAB.
 
 ### P1.7: Model-driven mesher
-- **Status:** review
+- **Status:** done
 - **Depends on:** P1.8
 - **Gate:** in-game
 - **Scope:** generalise `GridMesher` from fixed cubes to per-state models:
