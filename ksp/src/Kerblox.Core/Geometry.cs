@@ -42,10 +42,14 @@ namespace Kerblox.Core
         public readonly Float3 Origin;   // part-space position of cell (0,0,0)'s min corner
 
         public BlockLayout(VoxelGrid grid, float blockSize)
+            : this(grid.SizeX, grid.SizeY, grid.SizeZ, blockSize) { }
+
+        /// <summary>Layout for a grid of the given size, for callers that only know its dimensions.</summary>
+        public BlockLayout(int sizeX, int sizeY, int sizeZ, float blockSize)
         {
             if (!(blockSize > 0)) throw new ArgumentOutOfRangeException(nameof(blockSize));
             BlockSize = blockSize;
-            Origin = new Float3(-grid.SizeX * blockSize / 2f, -grid.SizeY * blockSize / 2f, -grid.SizeZ * blockSize / 2f);
+            Origin = new Float3(-sizeX * blockSize / 2f, -sizeY * blockSize / 2f, -sizeZ * blockSize / 2f);
         }
 
         public Float3 CellMin(int x, int y, int z) =>

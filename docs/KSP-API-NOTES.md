@@ -78,6 +78,30 @@ to `ilspycmd -p` output and are only a rough guide.
 | `Part.FindAttachNode(string)` exists | Verified by compile |
 | Moving a node with a part attached doesn't move that part | Unverified (Procedural Parts moves attached parts manually, see P2.2) |
 
+## Editor input and build mode (P2.3)
+
+| Fact | Status |
+| --- | --- |
+| `InputLockManager.SetControlLock(ControlTypes, string id)` stores the mask under the id (replacing an existing one) and ORs all ids into `lockMask`; `RemoveControlLock(id)` ignores unknown ids; `GetControlLock(id)` returns `ControlTypes.None` for unknown ids | Verified (`InputLockManager`) |
+| Editor part pickup in place mode (`on_partPicked`) and Delete-key part deletion are gated on `InputLockManager.IsUnlocked(ControlTypes.EDITOR_PAD_PICK_PLACE)` | Verified (`EditorLogic.SetupFSM`, `DeleteInputUpdate` ~line 9250) |
+| The offset/rotate/root modes' left-click selection (`on_offsetSelect`, `on_offsetDeselect`, ...) picks parts without checking any lock, so a tool that owns left click must keep the editor in place mode | Verified (`EditorLogic.SetupFSM`) |
+| `EditorLogic.fetch.toolsUI` is a public `EditorToolsUI`; `SetMode(ConstructionMode, bool updateUI = true)` refuses Move/Rotate while `EDITOR_GIZMO_TOOLS` is locked and Root while `EDITOR_ROOT_REFLOW` is locked; Place is always allowed unless a held part isn't in the ship. Hotkeys 1-4 go through `SetMode` | Verified (`EditorToolsUI.Update`, `SetMode`) |
+| Switching to Place with `selectedPart` in the ship goes to `st_idle`; with a held part not in the ship it stays in `st_place` | Verified (`on_goToModePlace`) |
+| `EditorLogic.SelectedPart` (static) returns `fetch.selectedPart` or null | Verified |
+| Undo/redo input is gated on `EDITOR_UNDO_REDO` | Verified (`EditorLogic.UndoRedoInputUpdate`) |
+| `EditorLogic.SetBackup()` is public, snapshots the ship (`ShipConstruction.CreateBackup`), truncates redo states, and fires `onEditorSetBackup` and `onEditorShipModified` | Verified |
+| `VABCamera`/`SPHCamera` only move while `CAMERACONTROLS` is unlocked and never read the left mouse button (orbit via `AXIS_CAMERA_HDG/PITCH`, pan on button 2, zoom on the wheel) | Verified (`VABCamera`, `SPHCamera`) |
+| `EditorLogic.editorCamera` is the public editor `Camera` (from `FindObjectOfType<EditorCamera>()`) | Verified (`EditorLogic.Awake` area ~line 1139) |
+| `EditorLogic` skips clicks when `EventSystem.current.IsPointerOverGameObject()` (PAWs, part list, toolbar) | Verified |
+| `ControlTypes` editor bits: `EDITOR_ICON_PICK`, `EDITOR_PAD_PICK_PLACE`, `EDITOR_PAD_PICK_COPY`, `EDITOR_GIZMO_TOOLS`, `EDITOR_ROOT_REFLOW`, `EDITOR_UNDO_REDO`, `EDITOR_MODE_SWITCH` exist | Verified (`ControlTypes`) |
+| `KSPEvent` has public `guiActive`, `guiActiveEditor`, `guiName`; `PartModule.Events[string]` returns the `BaseEvent`, whose `guiName` is settable | Verified (`KSPEvent`, `BaseEvent`, `BaseEventList`) |
+| Changing `BaseEvent.guiName` updates an open PAW's button label | In-game, P2.3 |
+| `HighLogic.Skin` is a public static `GUISkin` | Verified |
+| `ScreenMessages.PostScreenMessage(string, float, ScreenMessageStyle)` exists | Verified |
+| `GameEvents.onGameSceneLoadRequested` is `EventData<GameScenes>` | Verified (`GameEvents` ~line 442) |
+| `KSP/Alpha/Unlit Transparent` takes its tint from `_Color` | Verified (`PartReader` sets `_Color` on it); looks right in-game: In-game, P2.3 |
+| Other `EditorLogic` left-click handlers in idle place mode do nothing harmful while `EDITOR_PAD_PICK_PLACE` is locked | In-game, P2.3 |
+
 ## Open questions
 
 - Maximum length of a ConfigNode value in craft and save files (`gridData`). See P2.4.
