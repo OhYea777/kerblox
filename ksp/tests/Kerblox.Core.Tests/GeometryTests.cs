@@ -47,11 +47,12 @@ public class GeometryTests
     {
         var g = DefaultGrids.Capsule();
         var m = Mesh(g, 0.625f);
-        for (int t = 0; t < m.Triangles.Count; t += 3)
+        var tris = m.AllTriangles();
+        for (int t = 0; t < tris.Count; t += 3)
         {
-            Float3 a = m.Vertices[m.Triangles[t]], b = m.Vertices[m.Triangles[t + 1]], c = m.Vertices[m.Triangles[t + 2]];
+            Float3 a = m.Vertices[tris[t]], b = m.Vertices[tris[t + 1]], c = m.Vertices[tris[t + 2]];
             Float3 n = Float3.Cross(b - a, c - a);
-            Float3 expected = m.Normals[m.Triangles[t]];
+            Float3 expected = m.Normals[tris[t]];
             Assert.True(Float3.Dot(n, expected) > 0, $"triangle {t / 3} winds inward");
         }
     }
@@ -63,7 +64,8 @@ public class GeometryTests
         g.Set(0, 0, 0, Iron);
         var m = Mesh(g);
         int tile = Registry.Get(Iron)!.TileIndex;
-        float lo = (float)tile / Registry.TileCount, hi = (float)(tile + 1) / Registry.TileCount;
+        int tiles = new BuiltinModelSource(Registry).AtlasTileCount;
+        float lo = (float)tile / tiles, hi = (float)(tile + 1) / tiles;
         Assert.All(m.Uvs, uv => Assert.InRange(uv.U, lo, hi));
     }
 
