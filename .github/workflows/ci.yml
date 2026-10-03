@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    # The KSP plugin itself needs the game's proprietary DLLs, so CI builds and
+    # tests Kerblox.Core only. The plugin is built locally against a real install.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Test Kerblox.Core (net10.0) and build its net48 target
+        working-directory: ksp
+        run: |
+          dotnet build src/Kerblox.Core -c Release
+          dotnet test tests/Kerblox.Core.Tests -c Release

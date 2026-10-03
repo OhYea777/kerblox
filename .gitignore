@@ -1,0 +1,18 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+TestResults/
+
+# Build output copied into the mod folder by KSPBuildTools
+ksp/GameData/Kerblox/Plugins/
+
+# Local KSP install symlink (KSPBuildTools auto-detects KSP/ next to the .sln)
+/ksp/KSP
+
+# Agent / local tooling
+.claude/settings.local.json
+.claude/worktrees/

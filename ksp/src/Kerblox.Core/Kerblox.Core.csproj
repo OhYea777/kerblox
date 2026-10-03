@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Pure data/geometry library: no UnityEngine, no KSP references.
+    net48 is what ships to GameData (KSP's Mono runtime); net10.0 exists so the
+    unit tests (and later the bridge's fake stand-ins) can run on plain .NET.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>net48;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>Kerblox.Core</RootNamespace>
+    <AssemblyName>Kerblox.Core</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kerblox.Core.Tests" />
+  </ItemGroup>
+
+</Project>

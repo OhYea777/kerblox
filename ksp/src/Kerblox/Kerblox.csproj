@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The KSP plugin. KSPBuildTools references the game's own Managed/*.dll (including
+    its mscorlib) from $KSP_ROOT, adds the [KSPAssembly] attribute, and copies built
+    DLLs into GameData/Kerblox/Plugins in this repo. scripts/deploy.sh then syncs
+    that folder into $KSP_ROOT/GameData.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>Kerblox</RootNamespace>
+    <AssemblyName>Kerblox</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <Version>0.1.0</Version>
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
+
+    <KSPBT_ModRoot>$(MSBuildThisFileDirectory)../../GameData/Kerblox</KSPBT_ModRoot>
+    <KSPBT_ModPluginFolder>Plugins</KSPBT_ModPluginFolder>
+    <!-- No .version file / AVC until there is a release process. -->
+    <KSPBT_GenerateVersionFile>false</KSPBT_GenerateVersionFile>
+  </PropertyGroup>
+
+  <!--
+    KSPBuildTools only auto-detects <solution dir>/KSP when building the .sln.
+    Fall back to the same ksp/KSP link for project-only builds, after KSP_ROOT.
+  -->
+  <PropertyGroup Condition=" '$(KSPBT_GameRoot)' == '' And '$(KSP_ROOT)' == '' And Exists('$(MSBuildThisFileDirectory)../../KSP/KSP_Data/Managed/Assembly-CSharp.dll') ">
+    <KSPBT_GameRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../KSP'))</KSPBT_GameRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="KSPBuildTools" Version="1.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Kerblox.Core/Kerblox.Core.csproj" SetTargetFramework="TargetFramework=net48" />
+  </ItemGroup>
+
+</Project>
