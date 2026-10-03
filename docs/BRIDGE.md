@@ -231,14 +231,17 @@ offset size field
 | Limit | Value | Why |
 | --- | --- | --- |
 | `maxFrame` (announced) | ≥ 1 MiB; 16 MiB recommended | bounds each read buffer; unrelated to grid size |
-| `maxGridPayload` | 256 MiB | the largest legal `GridCodec` v2 payload is 134,347,802 bytes (≈ 128.1 MiB): 11 header + 3 palette count + 14 air + 65,535 × (2 + 1024) palette + 256³ × 4 (alternating cells, 1-byte run + 3-byte index). The limit is about 2× that |
+| `maxGridPayload` | 256 MiB | a safe overestimate of the largest legal `GridCodec` v2 payload bounds it at 134,347,802 bytes (≈ 128.1 MiB): 11 header + 3 palette count + 14 air + 65,535 × (2 + 1024) palette + 256³ × 4 (every cell a 1-byte run plus a 3-byte index). Not every term can be maxed at once (for one thing, indices below 16,384 take fewer bytes), so real payloads are smaller. The limit is about 2× the bound |
 | `GRID_OPEN` / `GRID_RESIZE` sizes | 1–256 per axis | `VoxelGrid.MaxDimension` |
 
 What a sender does when a message wouldn't fit the peer's `maxFrame`:
 
 - **FULL_SYNC** is always sent in chunks sized to fit (see FULL_SYNC). A
   one-chunk sync is just the common case.
-- **BLOCK_DELTA:** the sequencer sends a FULL_SYNC instead.
+- **BLOCK_DELTA:** the sequencer sends a FULL_SYNC instead. If the oversized
+  delta was a final echo, the FULL_SYNC (which contains the accepted changes)
+  is followed by an empty echo for that proposal, so it still gets exactly one
+  final echo.
 - **BLOCK_EDIT:** the proposer splits it into several edits. Proposals aren't
   atomic anyway.
 - Every other message has a small fixed upper bound (strings ≤ 1024 bytes). The
@@ -351,36 +354,107 @@ sides apply in the same order:
   - **flight** mode: **Minecraft** *(proposed, see open decision 3)*. KSP never
     edits a flight grid (AGENTS.md: grids are frozen in flight).
 - Only the sequencer sends `BLOCK_DELTA`, `GRID_RESIZE` and (after the seed)
-  `FULL_SYNC`. Each one advances `rev` by exactly one, even when a delta
-  changes nothing. A chunked FULL_SYNC counts once.
+  `FULL_SYNC`. Each one advances `rev` by exactly one, including a delta
+  with no changes (an empty echo, see [Proposals](#proposals-mirror-and-live-view))
+  and a delta whose changes are all no-ops. A chunked FULL_SYNC counts once.
 - The sequencer assigns `rev` and enqueues the message in one atomic step.
   A FULL_SYNC snapshot is taken at the moment it's enqueued, so its position in
   the stream matches its `rev`. Its chunks are sent back to back, with no other
   content frame for that grid in between. (Frames for other grids, and PING,
   may interleave.)
-- The other side sends **proposals** (`BLOCK_EDIT`) and applies them locally
-  right away (a Minecraft player's placement has already happened in the world).
-  The sequencer applies proposals in arrival order, then sends the result with
-  `originSeq` set to the proposal's `seq`.
+- The other side sends **proposals** (`BLOCK_EDIT`). They show up in its live
+  view right away (a Minecraft player's placement has already happened in the
+  world), but never in its sequenced mirror (see
+  [Proposals](#proposals-mirror-and-live-view)). The sequencer applies proposals
+  in arrival order and answers each with exactly one **final echo**: a
+  BLOCK_DELTA with `originSeq` set to the proposal's `seq`.
 - ACK_REQUESTED is set **only by the sequencer**, and ACK is sent **only by the
   non-sequencer**. The opener's seed is confirmed by GRID_READY instead, which
   covers flight mode, where KSP seeds but Minecraft sequences.
 
-**Why this converges:** the channel is ordered, so the non-sequencer receives
-every sequenced message in `rev` order. A KSP edit and a Minecraft edit can
-race on the same cell. Minecraft has already applied its own edit, then
-receives KSP's delta (overwriting it), then the echo of its own proposal
-(re-applying it). Both sides end on the proposal, which is the sequencer's
-order. Concurrent edits resolve as last-writer-wins *in sequencer order*, which
-for a single builder on each side is what people expect.
+### Proposals, mirror and live view
 
-**Rejections:** the sequencer may reject a proposal (`GridEditStatus.TooLarge`,
-a grid that isn't editable right now, a policy refusal). It still sends a
-`BLOCK_DELTA` with `originSeq` set. That delta carries the authoritative
-current state of every in-bounds cell the proposal touched, so the proposer's
-optimistic edit is reverted. (Out-of-bounds cells are air by definition, so the
-proposer reverts those itself.) It also sends `ERROR(edit_rejected)` with
-`refSeq`, so the Minecraft side can tell the player.
+The non-sequencer keeps two views of each grid:
+
+- The **mirror** is the grid at its current `rev`, built *only* from sequenced
+  frames (seed and FULL_SYNC, BLOCK_DELTA, GRID_RESIZE). Its own proposals
+  never touch it. Every protocol decision is made against the mirror: `baseRev`
+  checks, ACK hashes, and anchor/cell conversion. Minecraft's mirror is an
+  in-memory grid (a `short[]` plus palette, like `VoxelGrid`).
+- The **live view** is what the user sees: Minecraft's world in editor mode,
+  where players' unsequenced placements already exist. It's the mirror plus
+  the proposer's **pending** proposals.
+
+A proposal `s` is *pending* from the moment it's sent until its final echo
+(the BLOCK_DELTA with `originSeq = s`) has been applied to the mirror. The
+sequencer answers every BLOCK_EDIT with exactly one final echo. Before the
+echo it may send **at most one** GRID_RESIZE with the same `originSeq`: the
+composition of all the growth the proposal caused (`SetBlock` only grows, so
+the composition is itself one resize). The echo's changes are in the
+post-resize cell space.
+
+**Reconciling the live view:** after applying any sequenced frame to the
+mirror, the proposer writes the mirror's state of every cell that frame changed
+into the live view, *skipping cells touched by a still-pending proposal* (the
+player's newer block stays visible). After applying the final echo of `s`, it
+also resets every cell `s` touched to the mirror's state, again skipping cells
+touched by a later pending proposal. A touched cell outside the mirror's box is
+reset to air. The live view's writes during reconciliation aren't
+observations, so they're never proposed back.
+
+**Why this converges:** the channel is ordered, so the proposer applies every
+sequenced message in `rev` order, and its mirror equals the sequencer's grid at
+each `rev`. Take a KSP edit and a Minecraft edit racing on cell C:
+
+- If KSP's delta is sequenced first, Minecraft skips writing it to the world
+  (C is pending), then the echo sets C to the proposal in the mirror. World and
+  mirror agree.
+- If the proposal is sequenced first, the echo sets C, then KSP's delta
+  overwrites C in the mirror and the world.
+
+Either way both sides end in sequencer order. Concurrent edits resolve as
+last-writer-wins *in sequencer order*, which for a single builder on each side
+is what people expect. Once nothing is pending, the live view equals the mirror.
+
+**Rejections and partial acceptance:** the sequencer may refuse all or part of
+a proposal (`GridEditStatus.TooLarge`, a grid that isn't editable right now, a
+policy refusal). Its final echo carries **only the changes it actually made**,
+possibly none: an **empty echo** (`changeCount = 0`, `stateCount = 0`). An empty
+echo still advances `rev` by one, like every sequenced message, so revision
+counting has no special case. The proposer's reset step then reverts exactly the
+refused cells, including out-of-bounds ones that a TooLarge growth would have
+needed, with no extra signalling. For each refusal the sequencer also sends
+`ERROR(edit_rejected)` with `refSeq = s`, so the Minecraft side can tell the
+player. A no-op change (the cell already held that state) is simply left out of
+the echo.
+
+### What Minecraft proposes in editor mode
+
+Minecraft keeps editor regions **frozen**: no scheduled block ticks, random
+ticks or fluid ticks. It uses the same mechanism as a paused flight grid
+(`SIM_STATE`, P3.4 finds it). Editor regions are always frozen, and SIM_STATE
+applies to flight grids only.
+
+**Every change Minecraft observes** to a cell in a grid's region is proposed,
+whatever caused it, except its own reconciliation writes. That includes:
+
+- player placement and breaking
+- the neighbour shape updates a placement triggers in the same tick (fence and
+  wall connections, stair shapes, redstone wire connecting, a door's other half)
+- immediate redstone updates from a player flipping a lever
+- anything that leaks past the freeze
+
+Changes are coalesced into at most one BLOCK_EDIT per grid per server tick. A
+non-air change outside the current box is a growth proposal in anchor space.
+
+*Why propose rather than exclude:* those effects are part of the block-state
+string (`east=true` on a fence, `power=15` on wire). Excluding them would leave
+the craft file disagreeing with what the player sees, and the next audit would
+fail. Freezing limits the volume to what a player causes directly, so a
+redstone clock built in the editor can't stream edits into the craft file.
+
+In flight, Minecraft is the sequencer. It observes the same way and sends
+BLOCK_DELTAs, and KSP proposes nothing. KSP's mirror is its render grid.
 
 ## Resizes
 
@@ -443,12 +517,17 @@ while `rev` still matches. **The sequencer only compares hashes of the same
 revision:**
 
 1. To audit, the sequencer sets ACK_REQUESTED on one sequenced frame with
-   revision R: a delta, a resize, or the last chunk of a FULL_SYNC. At that
+   revision R: a BLOCK_DELTA or the last chunk of a FULL_SYNC, **never a
+   GRID_RESIZE**. A resize revision may be a state the sequencer never holds:
+   `GridEditor.SetBlock` returns the grown grid with the edit already applied,
+   so KSP can't hash "resized but not yet edited". At that
    moment it computes the hash of its own grid at R and stores the pair (R,
    hash). **At most one audit per grid is outstanding.** A new one isn't
    started until the previous ACK has arrived or the connection resets.
-2. The non-sequencer applies that frame, then hashes its grid *before applying
-   any later frame for that grid*, and replies `ACK(rev = R, hash)`.
+2. The non-sequencer applies that frame, then hashes its **mirror** (the
+   sequenced state only, never pending proposals, see
+   [Proposals](#proposals-mirror-and-live-view)) *before applying any later
+   frame for that grid*, and replies `ACK(rev = R, hash)`.
 3. The sequencer compares only when `ACK.rev` equals the stored R. Any other
    ACK (a stale one, or one from before a FULL_SYNC) is ignored.
 
@@ -460,6 +539,15 @@ and trigger a FULL_SYNC, forever. Keeping per-revision hashes for every
 revision would mean re-encoding the whole grid every tick. Snapshotting only
 the audited revision costs one encode per audit on each side, and it's correct
 however fast the grid changes.
+
+Hashing the mirror, not the live view, keeps audits correct while proposals are
+in flight. The live view contains unsequenced placements and would mismatch
+whenever a player is mid-build, falsely tripping `hash_disagreement`. The other
+option was to skip or mark an ACK dirty while the proposer has pending
+proposals. It was rejected because continuous building keeps a proposal
+pending nearly all the time, which would starve audits exactly when divergence
+is most likely. The mirror costs one in-memory grid, which Minecraft needs
+anyway for reconciliation.
 
 Audit rate: every FULL_SYNC is audited. Beyond that, at most one audit per
 5 s per grid, and only when `rev` has moved since the last one (so an idle grid
@@ -482,6 +570,14 @@ more than one FULL_SYNC in a row.
   of any revision ends the wait. If none arrives within 30 s (which can only
   happen through a bug, given an ordered channel), KSP closes and re-opens the
   grid.
+- A dropped BLOCK_DELTA can be the final echo of one of the proposer's own
+  proposals. The proposer still reads the `originSeq` of every BLOCK_DELTA it
+  drops, and marks that proposal *echo-dropped*. Its effect, if accepted, is
+  already in the sequencer's state, so it will be in the next FULL_SYNC. When
+  the FULL_SYNC is applied, every echo-dropped proposal is settled: its touched
+  cells are reset to the new mirror exactly as for a final echo, and it stops
+  being pending. Proposals whose echoes weren't dropped are unaffected and get
+  their echoes after the sync.
 - The sequencer answers each RESYNC_REQUEST with a FULL_SYNC at a new revision
   (current `rev` + 1). If a FULL_SYNC for that grid is already queued or being chunked
   out, it doesn't queue another.
@@ -654,8 +750,8 @@ chunkLength bytes
 u64  baseRev     rev before this delta
 u64  rev         baseRev + 1
 u32  originSeq   seq of the BLOCK_EDIT this sequences, 0 for the sequencer's own edits
-varint stateCount; state × stateCount           distinct canonical states in this message (1 … 65536)
-varint changeCount; changeCount × { u16 x, u16 y, u16 z, varint stateIndex }    cell space
+varint stateCount; state × stateCount           distinct canonical states in this message (0 … 65536)
+varint changeCount; changeCount × { u16 x, u16 y, u16 z, varint stateIndex }    cell space; 0 only in an empty echo
 ```
 
 **BLOCK_EDIT** (non-sequencer):
@@ -676,7 +772,12 @@ u16  sizeX, sizeY, sizeZ    new size, 1–256 each
 i32  shiftX, shiftY, shiftZ old cell c becomes c + shift (GridEdit.ShiftX/Y/Z)
 ```
 
-Change rules: `changeCount ≥ 1`. Delta coordinates are in bounds. Each cell
+Change rules: `changeCount ≥ 1` and `stateCount ≥ 1`, with one exception. A
+BLOCK_DELTA with `originSeq ≠ 0` (a final echo) may have `changeCount = 0`,
+and then `stateCount = 0` too. That's an empty echo, and it still advances
+`rev`. An empty BLOCK_DELTA with `originSeq = 0`, or an empty BLOCK_EDIT, is
+`bad_payload`. Every state in the table is referenced at least once. Delta
+coordinates are in bounds. Each cell
 appears at most once per message, and senders must not repeat one.
 `stateIndex < stateCount`. States that aren't canonical are `bad_payload` and
 aren't fixed up silently. A delta applies atomically.
@@ -685,8 +786,8 @@ aren't fixed up silently. A delta applies atomically.
 apply it and set `rev`. Otherwise follow [resync](#divergence-audits-and-resync).
 
 **ACK** (non-sequencer, only in reply to ACK_REQUESTED): `u64 rev` (the
-revision of the flagged frame), `u64 contentHash` (FNV-1a 64 of the grid's
-canonical encoding right after applying that frame). See
+revision of the flagged frame), `u64 contentHash` (FNV-1a 64 of the canonical encoding of the **mirror**
+right after applying that frame, without pending proposals). See
 [audits](#divergence-audits-and-resync).
 
 **RESYNC_REQUEST** (non-sequencer): `u64 haveRev`, `u8 reason` (0 rev gap,
@@ -735,7 +836,8 @@ acknowledgement or resync.
 paused, on-rails time warp, vessel packed). Minecraft should stop simulating
 the grid's region while paused, or at least stop sending `SIGNAL_OUTPUT` and
 ignore its changes. How it freezes a region is for P3.4 to investigate. Default
-after `GRID_OPEN(flight)` is running.
+after `GRID_OPEN(flight)` is running. SIM_STATE is for flight grids only:
+editor regions are always frozen (see [What Minecraft proposes](#what-minecraft-proposes-in-editor-mode)).
 
 ## Threading notes for implementers
 
@@ -746,8 +848,9 @@ after `GRID_OPEN(flight)` is running.
   enqueueing happen together on the main thread.
 - **Minecraft:** I/O runs on its own thread, and every world read or write is
   handed to the server thread (verify the NeoForge 1.21.1 API for this in P3.4).
-  Grid edits made by players are observed on the server thread and turned into
-  `BLOCK_EDIT` (editor) or `BLOCK_DELTA` (flight).
+  Cell changes are observed on the server thread and turned into
+  `BLOCK_EDIT` (editor, see [What Minecraft proposes](#what-minecraft-proposes-in-editor-mode))
+  or `BLOCK_DELTA` (flight). Reconciliation writes are excluded.
 
 ## Open decisions
 
