@@ -51,6 +51,17 @@ to `ilspycmd -p` output and are only a rough guide.
 | Stock `DRAG_CUBE { procedural = True }` re-renders every `ProceduralDragUpdateInterval` in flight | Verified (`DragCubeList` ~line 373) |
 | Re-rendering is safe only when `FlightGlobals.ready` (flight) or when the part is attached to `EditorLogic.RootPart` and not on layer TransparentFX (editor) | Taken from ROUtils `DragCubeTool`; in-game |
 
+## Editor events
+
+| Fact | Status |
+| --- | --- |
+| `GameEvents.onEditorShipModified` is `EventData<ShipConstruct>`; stock code fires it as `.Fire(EditorLogic.fetch.ship)` after editor-side part changes (`UIPartActionFieldItem`, `ModuleProceduralFairing`) | Verified (`GameEvents` ~line 761) |
+| `EditorLogic.fetch` (static) and `EditorLogic.ship` (`ShipConstruct`) are public fields | Verified (`EditorLogic` ~lines 535, 543) |
+| `HighLogic.LoadedSceneIsEditor` is a public static bool, true when the scene is `GameScenes.EDITOR` | Verified (`HighLogic` ~line 1251) |
+| `Part.UpdateMass()` is public and re-polls every `IPartMassModifier`; the editor also calls it per part in `ShipConstruct.GetShipMass` | Verified |
+| `ModifierChangeWhen` (`FIXED`/`STAGED`/`CONSTANTLY`) is only read by `DeltaVPartInfo` (skips `STAGED`); it doesn't gate `UpdateMass` | Verified |
+| Listeners (engineer report, dV, `ModuleCargoBay`) pick up a grid edit from `onEditorShipModified` | In-game, P2.3 |
+
 ## Rendering
 
 | Fact | Status |

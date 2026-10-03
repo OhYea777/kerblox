@@ -116,6 +116,59 @@ namespace Kerblox.Core
 
         public int CountNonAir() => cells.Length - counts[0];
 
+        /// <summary>Number of cells holding <paramref name="state"/>.</summary>
+        public int CountOf(BlockState state) => lookup.TryGetValue(state, out ushort idx) ? counts[idx] : 0;
+
+        /// <summary>
+        /// Copies this grid into a new grid of the given size, with each old cell
+        /// (x,y,z) landing at (x+offsetX, y+offsetY, z+offsetZ). Cells that land
+        /// outside are dropped; new cells are air. Offsets are in cells and may be
+        /// negative (crop) or positive (grow on the low side). The palette carries
+        /// over (use counts recomputed), and the copy's <see cref="Revision"/> is one
+        /// past this grid's so a resize always reads as an edit. <see cref="Changed"/>
+        /// subscribers stay on this grid.
+        /// </summary>
+        public VoxelGrid Resized(int sizeX, int sizeY, int sizeZ, int offsetX, int offsetY, int offsetZ)
+        {
+            var copy = new VoxelGrid(sizeX, sizeY, sizeZ);
+            // Only the overlap of the old box, shifted, and the new box needs copying.
+            int x0 = Math.Max(0, -offsetX), x1 = Math.Min(SizeX, sizeX - offsetX);
+            int y0 = Math.Max(0, -offsetY), y1 = Math.Min(SizeY, sizeY - offsetY);
+            int z0 = Math.Max(0, -offsetZ), z1 = Math.Min(SizeZ, sizeZ - offsetZ);
+            for (int y = y0; y < y1; y++)
+                for (int z = z0; z < z1; z++)
+                {
+                    int src = IndexOf(x0, y, z), dst = copy.IndexOf(x0 + offsetX, y + offsetY, z + offsetZ);
+                    if (x1 > x0) Array.Copy(cells, src, copy.cells, dst, x1 - x0);
+                }
+
+            var newCounts = new int[palette.Count];
+            foreach (ushort c in copy.cells) newCounts[c]++;
+            copy.ReplacePalette(palette, newCounts);
+            copy.Revision = Revision + 1;
+            return copy;
+        }
+
+        /// <summary>
+        /// Inclusive bounds of the non-air cells, or false if the grid is all air.
+        /// </summary>
+        public bool TryGetOccupiedBounds(out GridBox bounds)
+        {
+            int minX = SizeX, minY = SizeY, minZ = SizeZ, maxX = -1, maxY = -1, maxZ = -1;
+            for (int y = 0; y < SizeY; y++)
+                for (int z = 0; z < SizeZ; z++)
+                    for (int x = 0; x < SizeX; x++)
+                    {
+                        if (cells[IndexOf(x, y, z)] == 0) continue;
+                        if (x < minX) minX = x; if (x > maxX) maxX = x;
+                        if (y < minY) minY = y; if (y > maxY) maxY = y;
+                        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+                    }
+            if (maxX < 0) { bounds = default; return false; }
+            bounds = new GridBox(minX, minY, minZ, maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1);
+            return true;
+        }
+
         /// <summary>
         /// Drops palette entries no cell uses and renumbers the rest in order of first
         /// appearance in storage order (air stays 0). Content and <see cref="Revision"/>
