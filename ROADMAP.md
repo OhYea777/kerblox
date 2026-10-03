@@ -180,7 +180,7 @@ exactly as they look in Minecraft: [docs/RENDERING.md](docs/RENDERING.md)
 (P3.7–P3.12).
 
 ### P3.1: Protocol specification
-- **Status:** todo
+- **Status:** review
 - **Depends on:** P1.8
 - **Gate:** none
 - **Scope:** finalise docs/BRIDGE.md: transport choice (Unix socket vs
