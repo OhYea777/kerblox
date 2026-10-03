@@ -5,7 +5,8 @@ marked **open** need the user.
 
 ## Goal
 
-A NeoForge 1.21.1 Minecraft instance holds a mirror of each block-grid part.
+A NeoForge 1.21.1 **dedicated server** holds a mirror of each block-grid part.
+A player can join it with a normal client to build, and watch edits appear in KSP.
 While a craft is in the VAB/SPH, block edits flow in both directions. In flight,
 Minecraft runs the block logic (redstone, then modded machines) against a frozen
 copy and streams outputs (powered output blocks, energy, fluids) back to KSP.
@@ -30,6 +31,13 @@ Taken from [SkyCraft](https://github.com/chasmlol/SkyCraft):
 - **Block state**: the high 16 bits of `BlockState` hold per-block state such as
   redstone power and facing, and block names already match Minecraft's ids.
 
+## Decided
+
+- **NeoForge 1.21.1** (not Fabric): Mekanism, Create and AE2 overlap there, and
+  capabilities give generic access to modded energy, fluids and items.
+- **Dedicated server** (not a headless client): redstone and machine logic are
+  server-side anyway.
+
 ## Open decisions
 
 1. **Transport**: a Unix domain socket (simple framing, natural
@@ -37,10 +45,7 @@ Taken from [SkyCraft](https://github.com/chasmlol/SkyCraft):
    (lower latency, the SkyCraft approach, but needs manual synchronisation).
    For editor-time sync, latency barely matters. For flight-time redstone at
    20 Hz, either is fast enough. Leaning towards a socket unless measurements say otherwise.
-2. **Dedicated server or headless client**: redstone and modded machine
-   logic run server-side. A dedicated server is the simpler headless target,
-   and a player could join it with a normal client to build in Minecraft.
-3. **World mapping**: one region per grid part (e.g. spaced plots in a void
+2. **World mapping**: one region per grid part (e.g. spaced plots in a void
    world), or one dimension per craft.
-4. **Ownership during flight**: Minecraft is authoritative for block state,
+3. **Ownership during flight**: Minecraft is authoritative for block state,
    KSP for geometry (no geometry edits in flight).

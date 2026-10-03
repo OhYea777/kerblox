@@ -12,6 +12,9 @@ preamble leaves you unsure.
 
 ## 1. Orient
 
+- If `ksp/KSP` doesn't exist yet (Orca setup still running or skipped), run
+  `scripts/worktree-setup.sh "$(git worktree list | head -1 | cut -d' ' -f1)" "$PWD"`.
+  It's idempotent.
 - Read `AGENTS.md`, your item in `ROADMAP.md`, `docs/ARCHITECTURE.md`, and
   `docs/KSP-API-NOTES.md`.
 - Check that the item's dependencies are `done` on main. If not, ask (or

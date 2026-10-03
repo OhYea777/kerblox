@@ -163,12 +163,10 @@ alone. Draft design: [docs/BRIDGE.md](docs/BRIDGE.md).
 - **Scope:** finalise docs/BRIDGE.md: transport choice (Unix socket vs
   `/dev/shm` ring buffers), header layout, versioning, message set (hello,
   full sync = `GridCodec` payload, block delta, redstone state, ack/resync).
-  Target NeoForge 1.21.1. Decide **dedicated server vs headless client**:
-  redstone and modded machine logic run server-side, so a dedicated server
-  (which the user can join with a normal client to build) may be simpler
-  than a headless client.
-- **Acceptance:** spec merged; user has signed off on the transport and the
-  server/client choice.
+  Target NeoForge 1.21.1 on a **dedicated server** (decided 2026-10-03:
+  redstone and modded machine logic run server-side, and the user can join
+  with a normal client to build in Minecraft).
+- **Acceptance:** spec merged; user has signed off on the transport.
 
 ### P3.2: C# bridge transport in Core
 - **Status:** todo
@@ -201,9 +199,8 @@ alone. Draft design: [docs/BRIDGE.md](docs/BRIDGE.md).
 - **Status:** todo
 - **Depends on:** P3.4
 - **Gate:** none
-- **Scope:** script that launches the instance chosen in P3.1 (dedicated
-  server, or a headless client such as HeadlessMC) with the mod against a
-  local world, with its lifecycle tied to KSP's.
+- **Scope:** script that launches a NeoForge dedicated server with the mod
+  against a local void world, with its lifecycle tied to KSP's.
 - **Acceptance:** `scripts/mc-run.sh` starts and stops cleanly.
 
 ### P3.6: KSP-side bridge client

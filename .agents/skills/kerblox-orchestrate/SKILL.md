@@ -27,7 +27,8 @@ clean, and report once at the end. You do not write feature code yourself.
 
 - **Ready** means the item's Status is `todo` and every id in "Depends on" is
   `done`. If the user named ids, use those, but stop and report if one isn't ready.
-- Default batch: every ready item, capped at **4** parallel lanes.
+- Default batch: every ready item, capped at **4** parallel lanes (the
+  user's choice; don't exceed it without being asked).
 - Don't parallelise two items that will edit the same files heavily (for
   example two items that both rewrite `ModuleBlockGrid.cs`). Chain them with a
   dependency instead.
