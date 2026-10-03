@@ -95,7 +95,7 @@ with correct mass, CoM and drag.
   looks unchanged in the VAB.
 
 ### P1.8: Palette-based grid format (codec v2)
-- **Status:** todo
+- **Status:** done
 - **Depends on:** P1.3
 - **Gate:** none
 - **Scope:** replace fixed 16-bit type ids with a per-grid **palette** of

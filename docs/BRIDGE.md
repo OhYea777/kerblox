@@ -28,8 +28,9 @@ Taken from [SkyCraft](https://github.com/chasmlol/SkyCraft):
 - **Full sync**: a `GridCodec` payload (magic `KBGR`, versioned, RLE).
 - **Deltas**: `VoxelGrid.Changed` events carry `(x, y, z, old, new, revision)`.
 - **Divergence detection**: `VoxelGrid.Revision`. On a mismatch, request a full sync.
-- **Block state**: the high 16 bits of `BlockState` hold per-block state such as
-  redstone power and facing, and block names already match Minecraft's ids.
+- **Block state**: `BlockState` is Minecraft's own canonical block-state string
+  (`minecraft:repeater[delay=2,facing=east,...]`), held in a per-grid palette, so
+  redstone power, facing and arbitrary modded states map 1:1.
 
 ## Decided
 

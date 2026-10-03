@@ -106,6 +106,14 @@ namespace Kerblox
                 try
                 {
                     grid = GridCodec.FromText(gridData);
+                    // Re-encode so older formats (v1 fixed ids) are saved back as the
+                    // current palette format; a current payload re-encodes identically.
+                    string current = GridCodec.ToText(grid);
+                    if (current != gridData)
+                    {
+                        Log.Info($"Re-encoded gridData on {part.partInfo?.name ?? part.name} as grid format v{GridCodec.Version}");
+                        gridData = current;
+                    }
                     return;
                 }
                 catch (FormatException e)

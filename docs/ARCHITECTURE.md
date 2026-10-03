@@ -15,18 +15,25 @@ mismatch at runtime.
 
 ## Grid data model (`Kerblox.Core`)
 
-- **`BlockState`**: 32 bits. The low 16 bits are the block type id (0 = air) and
-  the high 16 bits are per-block state, reserved for redstone power, facing, and
-  so on. The bridge can treat a grid as a flat `uint[]`.
-- **`BlockRegistry`**: maps type ids to `BlockType` (Minecraft name, density in
-  t/m³, solid, opaque, colour, tile pattern). Unknown ids behave as air. Ids are
-  stable forever.
+- **`BlockState`**: a Minecraft block state in canonical string form,
+  `namespace:block[prop=value,...]` with properties sorted by name (brackets
+  omitted when empty, missing namespace = `minecraft`). Equality is ordinal on
+  that string. `default(BlockState)` is `minecraft:air`.
+- **`BlockRegistry`**: maps block names (the state without properties) to
+  `BlockType` (density in t/m³, solid, opaque, colour, tile pattern). Unknown
+  blocks behave as air but keep their state string in the grid. `Ids` survives
+  only as the v1 id table for migrating old craft files.
 - **`VoxelGrid`**: dense, fixed size up to 256³. Storage is Y-major
-  (`(y * SizeZ + z) * SizeX + x`). Out-of-bounds reads return air. `Revision`
+  (`(y * SizeZ + z) * SizeX + x`). Cells are `ushort` indices into a per-grid
+  palette of `BlockState`s, index 0 = air, like Minecraft chunk sections; entries
+  are appended on write and dropped by `Compact()`. Out-of-bounds reads return air. `Revision`
   increments on every effective edit, and `Changed` fires per single-block edit.
   Those are the hooks for editor undo and bridge sync.
-- **`GridCodec`**: magic `KBGR`, version byte, three u16 dimensions, then
-  (varint run, u32 state) runs. The text form is base64url without padding,
+- **`GridCodec`** (v2): magic `KBGR`, version byte, three u16 dimensions, a
+  varint-counted palette of length-prefixed UTF-8 state strings (entry 0 = air,
+  compacted, first-appearance order so equal grids encode identically), then
+  (varint run, varint palette index) runs. v1 payloads (u32 fixed-id states) still
+  decode, mapped through the old ids, and `ModuleBlockGrid` re-saves them as v2. The text form is base64url without padding,
   because KSP's ConfigNode parser treats `//` as a comment and `=` as a separator.
 
 ## Coordinates
@@ -84,6 +91,6 @@ block-state palettes (P1.8), and the mesher becomes model-driven (P1.7).
 
 See [BRIDGE.md](BRIDGE.md). The grid data model already provides what the
 bridge needs: a flat, versioned binary snapshot (`GridCodec`), per-edit events
-with revisions (`VoxelGrid.Changed`), and a state half in `BlockState`
-for redstone. The bridge will sit in its own project beside Core and won't
+with revisions (`VoxelGrid.Changed`), and Minecraft block-state strings in
+`BlockState`, so redstone power, facing and modded states map 1:1. The bridge will sit in its own project beside Core and won't
 modify it.

@@ -10,11 +10,11 @@ namespace Kerblox.Core
         public static VoxelGrid Capsule()
         {
             var g = new VoxelGrid(4, 8, 4);
-            var iron = new BlockState(BlockRegistry.Ids.IronBlock);
-            var stone = new BlockState(BlockRegistry.Ids.Stone);
-            var glass = new BlockState(BlockRegistry.Ids.Glass);
-            var planks = new BlockState(BlockRegistry.Ids.OakPlanks);
-            var wool = new BlockState(BlockRegistry.Ids.WhiteWool);
+            var iron = BlockState.Parse("minecraft:iron_block");
+            var stone = BlockState.Parse("minecraft:stone");
+            var glass = BlockState.Parse("minecraft:glass");
+            var planks = BlockState.Parse("minecraft:oak_planks");
+            var wool = BlockState.Parse("minecraft:white_wool");
 
             g.Fill(0, 0, 0, 3, 0, 3, iron);
             for (int y = 1; y <= 5; y++)
