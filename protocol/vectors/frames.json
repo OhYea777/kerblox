@@ -1,0 +1,32 @@
+{
+  "$comment": "Golden bridge frames. Each 'hex' is one complete frame (header + payload). Decoders must parse it to 'decoded'; encoders must produce exactly 'hex' from it. See docs/BRIDGE.md.",
+  "frames": [
+    {
+      "name": "block-delta-example",
+      "description": "Worked example in BRIDGE.md: BLOCK_DELTA, grid 1, seq 7, rev 4 -> 5, cell (2,0,3) = minecraft:stone.",
+      "hex": "390000000102000001000000070000000400000000000000050000000000000000000000010f6d696e6563726166743a73746f6e650102000000030000",
+      "decoded": {
+        "type": "BLOCK_DELTA",
+        "flags": 0,
+        "grid": 1,
+        "seq": 7,
+        "baseRev": 4,
+        "rev": 5,
+        "originSeq": 0,
+        "states": [
+          "minecraft:stone"
+        ],
+        "changes": [
+          {
+            "pos": [
+              2,
+              0,
+              3
+            ],
+            "state": 0
+          }
+        ]
+      }
+    }
+  ]
+}

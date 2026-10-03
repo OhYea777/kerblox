@@ -5,10 +5,14 @@
 the transport choice. Sections marked *proposed* still need the user. Everything
 else is the contract P3.2 (C#) and P3.4 (Java) implement.
 
-Numeric constants (message types, error codes, limits) are also kept in
-[`protocol/bridge-constants.json`](../protocol/bridge-constants.json). The tables
-here and that file must agree. P3.2 and P3.4 each add a test that checks their
-constants against it.
+Shared machine-readable files live in [`protocol/`](../protocol):
+
+- [`bridge-constants.json`](../protocol/bridge-constants.json): message types,
+  error codes and limits. The tables here and that file must agree. P3.2 and
+  P3.4 each test their constants against it.
+- [`vectors/gridcodec-v2.json`](../protocol/vectors/gridcodec-v2.json): golden
+  grid encodings with their content hashes, generated from `GridCodec`.
+- [`vectors/frames.json`](../protocol/vectors/frames.json): golden frames.
 
 ## Goal
 
@@ -34,8 +38,13 @@ Taken from [SkyCraft](https://github.com/chasmlol/SkyCraft):
 
 - **Full sync**: a `GridCodec` payload (magic `KBGR`, v2: palette of canonical
   block-state strings, then RLE runs of palette indices). Equal grids encode to
-  identical bytes, which the protocol uses for content hashes.
+  identical bytes (see [Canonical grid encoding](#canonical-grid-encoding)), which
+  the protocol uses for content hashes.
 - **Deltas**: `VoxelGrid.Changed` events carry `(x, y, z, old, new, revision)`.
+- **Resizes** (P2.1): `GridEditor.SetBlock` grows the grid to reach a cell
+  outside it, and `GridEditor.Trim` shrinks it. Both return a `GridEdit` with
+  the new size and the cell shift (old `(x,y,z)` is now `(x+ShiftX, …)`), and
+  `ModuleBlockGrid.GridResized` fires. The protocol carries this as `GRID_RESIZE`.
 - **Divergence detection**: revisions. The protocol keeps its own per-grid
   counter (see [Revisions](#revisions-and-the-sequencer)), separate from
   `VoxelGrid.Revision`.
@@ -78,7 +87,7 @@ render packs straight to the local cache. See [RENDERING.md](RENDERING.md).
 ## Transport (proposed, awaiting user sign-off)
 
 The protocol needs a **reliable, ordered, bidirectional** channel. The
-conflict rules below depend on in-order delivery. Two candidates:
+conflict and resync rules below depend on in-order delivery. Two candidates:
 
 ### Option A: Unix domain socket (stream)
 
@@ -140,8 +149,8 @@ per direction, with head/tail counters updated with acquire/release ordering.
   would be needed. On Windows that would be a mapped file in `%TEMP%`. Neither
   covers a server on another machine.
 - **Complexity:** high. It needs a versioned segment header, wrap-around, and
-  messages larger than the ring (a worst-case 256³ full sync is tens of MB), so
-  either chunking or very large rings. It also needs a wakeup strategy, death
+  messages larger than the ring (a full sync can be over 100 MiB, see
+  [Size limits](#size-limits)). It also needs a wakeup strategy, death
   detection (heartbeats plus PID checks, since there's no EOF) and stale-segment
   cleanup after crashes. Both fakes have to reimplement all of it.
 - **Topology fit:** works only when both processes share a machine and a
@@ -184,13 +193,13 @@ defaults to big-endian, so the Java side must set `ByteOrder.LITTLE_ENDIAN`.
 | --- | --- |
 | `u8`, `u16`, `u32`, `u64` | unsigned little-endian, fixed width |
 | `i32` | signed little-endian, two's complement |
-| `varint` | unsigned LEB128, at most 5 bytes, value ≤ 2³²−1 (exactly `GridCodec`'s varint) |
+| `varint` | unsigned LEB128, value ≤ 2³²−1, at most 5 bytes (exactly `GridCodec`'s varint). Writers emit the minimal encoding. |
 | `str` | `varint` byte length, then UTF-8 bytes, no terminator |
-| `state` | a `str` holding a canonical block state (`ns:block[k=v,...]`, properties sorted by name, brackets omitted when empty), at most 1024 bytes (`GridCodec.MaxStateLength`) |
+| `state` | a `str` holding a canonical block state (`ns:block[k=v,...]`, properties sorted by name, brackets omitted when empty), 1 to 1024 bytes (`GridCodec.MaxStateLength`) |
 
 The Java side must produce the same canonical strings as `BlockState`:
 registry name, then each property as `name=Property#getName(value)`, sorted by
-property name. P3.4 adds shared test vectors.
+property name (ordinal). The golden vectors include properties.
 
 ### Frame header (16 bytes)
 
@@ -200,23 +209,46 @@ offset size field
 4      u16  type     message type (table below)
 6      u16  flags    bit 0 ACK_REQUESTED; other bits reserved: send 0, ignore on receipt
 8      u32  grid     grid handle; 0 = connection-level message
-12     u32  seq      per-direction frame counter: HELLO is 1, +1 per frame, wraps to 0
+12     u32  seq      per-direction frame counter, see below
 16     ...  payload
 ```
 
-- `maxFrame` is what the *receiver* announced in HELLO (default and minimum
-  64 MiB, enough for a worst-case 256³ `GridCodec` payload). A frame larger
-  than that is a protocol violation.
+- **`seq`** starts at 1 (HELLO) and goes up by 1 per frame. After
+  `0xFFFFFFFF` it wraps to **1, never 0**, so 0 stays free as the "none"
+  sentinel in `refSeq` and `originSeq`. A reference to a frame names the most
+  recent frame with that seq. At realistic rates (≤ a few thousand frames per
+  second) a wrap takes weeks, so no reference is ambiguous.
+- `maxFrame` is what the *receiver* announced in HELLO. A frame larger than that
+  is a protocol violation. Senders keep every frame within it using the rules in
+  [Size limits](#size-limits), so a large grid never causes a violation.
 - **Payloads are extensible:** a receiver ignores bytes after the last field it
   knows. Minor versions may only append fields. (This is unlike `GridCodec`,
   which rejects trailing bytes. A nested codec blob always has its own length
   prefix.)
-- `seq` lets `ERROR` and `BLOCK_DELTA` refer to a specific frame.
+
+### Size limits
+
+| Limit | Value | Why |
+| --- | --- | --- |
+| `maxFrame` (announced) | ≥ 1 MiB; 16 MiB recommended | bounds each read buffer; unrelated to grid size |
+| `maxGridPayload` | 256 MiB | the largest legal `GridCodec` v2 payload is 134,347,802 bytes (≈ 128.1 MiB): 11 header + 3 palette count + 14 air + 65,535 × (2 + 1024) palette + 256³ × 4 (alternating cells, 1-byte run + 3-byte index). The limit is about 2× that |
+| `GRID_OPEN` / `GRID_RESIZE` sizes | 1–256 per axis | `VoxelGrid.MaxDimension` |
+
+What a sender does when a message wouldn't fit the peer's `maxFrame`:
+
+- **FULL_SYNC** is always sent in chunks sized to fit (see FULL_SYNC). A
+  one-chunk sync is just the common case.
+- **BLOCK_DELTA:** the sequencer sends a FULL_SYNC instead.
+- **BLOCK_EDIT:** the proposer splits it into several edits. Proposals aren't
+  atomic anyway.
+- Every other message has a small fixed upper bound (strings ≤ 1024 bytes). The
+  exception is SIGNAL_* with absurdly many ports, which would be a sender bug.
+  Those messages are within 1 MiB by construction.
 
 ### Worked example
 
 `BLOCK_DELTA` on grid 1, seq 7, revision 4 → 5, setting cell (2, 0, 3) to
-`minecraft:stone`:
+`minecraft:stone` (also in `vectors/frames.json`):
 
 ```
 39 00 00 00  01 02  00 00  01 00 00 00  07 00 00 00     length=57 type=0x0201 flags=0 grid=1 seq=7
@@ -226,6 +258,48 @@ offset size field
 01  0F 6D 69 6E 65 63 72 61 66 74 3A 73 74 6F 6E 65     1 state: "minecraft:stone"
 01  02 00 00 00 03 00  00                               1 change: x=2 y=0 z=3 state#0
 ```
+
+## Canonical grid encoding
+
+`FULL_SYNC` carries a `GridCodec` v2 payload, and content hashes are FNV-1a 64
+over those bytes. So **both sides must produce byte-identical v2 encodings of
+equal grids.** The Java side reproduces exactly what `GridCodec.ToBytes` emits
+(`ksp/src/Kerblox.Core/GridCodec.cs`, `VoxelGrid.BuildCompactRemap`):
+
+1. `4B 42 47 52` (`KBGR`), then the version byte `02`.
+2. `u16` SizeX, SizeY, SizeZ, each 1–256.
+3. **Palette:** `varint` count N, then N × (`varint` byte length, UTF-8 canonical
+   state).
+   - Entry 0 is always `minecraft:air`, **even if no cell is air**.
+   - Then every non-air state that occurs in at least one cell, exactly once,
+     **in order of first appearance in storage order** (rule 4). A state that no
+     cell holds any more (placed, then removed) is not written. How the
+     encoder's in-memory palette happens to be ordered has no effect.
+4. **Storage order** is Y-major: cell index `(y * SizeZ + z) * SizeX + x`, so x
+   varies fastest, then z, then y.
+5. **Cells:** (`varint` run length ≥ 1, `varint` palette index) pairs covering
+   all `SizeX·SizeY·SizeZ` cells in storage order. Runs are **maximal**: two
+   consecutive pairs never have the same index. Runs freely cross row and layer
+   boundaries, and a single run can cover the whole grid.
+6. All varints are minimal LEB128 (no `0x80`-padded forms). Nothing follows the
+   last run.
+
+The decoder is more lenient (it accepts non-minimal varints and non-maximal
+runs), but those inputs aren't canonical. Hashes are only defined over
+canonical bytes.
+
+**Content hash:** FNV-1a 64 (offset basis `0xcbf29ce484222325`, prime
+`0x100000001b3`) over the canonical bytes, sent as `u64`. Revisions and the
+anchor offset aren't part of it.
+
+**Golden vectors:** `protocol/vectors/gridcodec-v2.json` lists grids (size and
+non-air cells) with their expected `hex`, `base64url` and `fnv1a64`. They cover
+an all-air grid, a grid with no air cell, edit order differing from storage
+order, sorted properties, a modded namespace, a removed state, runs crossing
+rows, and a two-byte run varint. They were generated from `GridCodec` on main and
+verified to round-trip. Each side's tests must encode every vector to exactly
+`hex` and decode `hex` back to the listed cells. Whenever `GridCodec` changes,
+regenerate the vectors and bump the codec version.
 
 ## Versioning
 
@@ -238,9 +312,29 @@ offset size field
 - **Grid payload version:** HELLO carries the highest `GridCodec` version each
   side decodes. Senders encode `FULL_SYNC` at or below the peer's maximum.
   Today that's 2 on both sides, and v1 is never sent over the bridge. Bumping
-  `GridCodec` doesn't bump the protocol major.
+  `GridCodec` doesn't bump the protocol major, but content hashes are only
+  compared when both sides encode the same version.
 - The header layout and HELLO's fields up to `maxFrame` are frozen for all
   versions, so any two builds can at least exchange HELLO and fail cleanly.
+
+## Coordinates
+
+- **Cell space:** `0 … size−1` on each axis at the grid's *current* revision.
+  BLOCK_DELTA, signals and the `GridCodec` payload use it. It shifts whenever a
+  resize adds or removes cells on a low side.
+- **Anchor space** (`i32`): a frame fixed for the whole life of a grid handle.
+  At the seed, cell `(0,0,0)` is anchor `(0,0,0)`. Each side keeps an
+  `anchorOffset` (initially 0) with `anchor = cell + anchorOffset`. A resize with
+  shift `s` (old cell `c` becomes `c + s`) sets `anchorOffset −= s`, so every
+  surviving block keeps its anchor coordinates. BLOCK_EDIT uses anchor space.
+  That way a proposal stays correct even when a resize is sequenced between
+  the proposer's view and the sequencer applying it. It can also name cells
+  outside the current box, which grows the grid.
+- **Minecraft world:** a grid's region is fixed in the world. GRID_READY
+  reports the world position of anchor `(0,0,0)`, so world = anchor origin +
+  anchor, and cell `(0,0,0)` sits at anchor origin + `anchorOffset`. A resize
+  never moves blocks in the world. KSP keeps blocks still in *its* world by
+  moving the part (P2.2), which is KSP's business.
 
 ## Revisions and the sequencer
 
@@ -250,37 +344,68 @@ and differs between the two sides. `rev` counts sequenced messages, which both
 sides apply in the same order:
 
 - The opener's `FULL_SYNC` right after `GRID_OPEN` seeds the grid at `rev = 0`.
+  KSP is always the opener.
 - After that, exactly one side is the **sequencer** for the grid:
   - **editor** mode: **KSP**. The craft file is the source of truth, and KSP
     is the side that saves it.
   - **flight** mode: **Minecraft** *(proposed, see open decision 3)*. KSP never
     edits a flight grid (AGENTS.md: grids are frozen in flight).
-- Only the sequencer sends `BLOCK_DELTA` and (after the seed) `FULL_SYNC`. Each
-  one advances `rev` by exactly one, even when a delta changes nothing.
+- Only the sequencer sends `BLOCK_DELTA`, `GRID_RESIZE` and (after the seed)
+  `FULL_SYNC`. Each one advances `rev` by exactly one, even when a delta
+  changes nothing. A chunked FULL_SYNC counts once.
+- The sequencer assigns `rev` and enqueues the message in one atomic step.
+  A FULL_SYNC snapshot is taken at the moment it's enqueued, so its position in
+  the stream matches its `rev`. Its chunks are sent back to back, with no other
+  content frame for that grid in between. (Frames for other grids, and PING,
+  may interleave.)
 - The other side sends **proposals** (`BLOCK_EDIT`) and applies them locally
   right away (a Minecraft player's placement has already happened in the world).
-  The sequencer applies proposals in arrival order, then sends a `BLOCK_DELTA`
-  with `originSeq` set to the proposal's `seq`.
+  The sequencer applies proposals in arrival order, then sends the result with
+  `originSeq` set to the proposal's `seq`.
+- ACK_REQUESTED is set **only by the sequencer**, and ACK is sent **only by the
+  non-sequencer**. The opener's seed is confirmed by GRID_READY instead, which
+  covers flight mode, where KSP seeds but Minecraft sequences.
 
 **Why this converges:** the channel is ordered, so the non-sequencer receives
-every sequenced delta in `rev` order. A KSP edit and a Minecraft edit can race
-on the same cell. Minecraft has already applied its own edit, then receives
-KSP's delta (overwriting it), then the echo of its own proposal (re-applying
-it). Both sides end on the proposal, which is the sequencer's order.
-Concurrent edits resolve as last-writer-wins *in sequencer order*, which for a
-single builder on each side is what people expect.
+every sequenced message in `rev` order. A KSP edit and a Minecraft edit can
+race on the same cell. Minecraft has already applied its own edit, then
+receives KSP's delta (overwriting it), then the echo of its own proposal
+(re-applying it). Both sides end on the proposal, which is the sequencer's
+order. Concurrent edits resolve as last-writer-wins *in sequencer order*, which
+for a single builder on each side is what people expect.
 
-**Rejections:** the sequencer may reject a proposal (out of bounds, a grid
-that isn't editable right now, a policy refusal). It still sends a
+**Rejections:** the sequencer may reject a proposal (`GridEditStatus.TooLarge`,
+a grid that isn't editable right now, a policy refusal). It still sends a
 `BLOCK_DELTA` with `originSeq` set. That delta carries the authoritative
-current state of every cell the proposal touched, so the proposer's optimistic
-edit is reverted. It also sends `ERROR(edit_rejected)` with `refSeq`, so the
-Minecraft side can tell the player.
+current state of every in-bounds cell the proposal touched, so the proposer's
+optimistic edit is reverted. (Out-of-bounds cells are air by definition, so the
+proposer reverts those itself.) It also sends `ERROR(edit_rejected)` with
+`refSeq`, so the Minecraft side can tell the player.
 
-**Flight-mode deltas** (proposed): Minecraft's deltas in flight change what KSP
-*renders* (a lamp lights up, a repeater's `powered` flips), never KSP's
-geometry. Mass, colliders and attach nodes stay those of the frozen copy taken
-at launch. Ownership is Minecraft for block state and KSP for geometry.
+## Resizes
+
+In editor mode a placement outside the box grows the grid (`GridEditor.SetBlock`),
+and `GridEditor.Trim` shrinks it. The sequencer (KSP) sends **GRID_RESIZE**
+with the new size and the shift. Then, as a separate message with the next
+`rev`, it sends the BLOCK_DELTA for the edit that caused the growth. Applying a
+resize means exactly `VoxelGrid.Resized(newSize, shift)`: each old cell `c`
+moves to `c + shift`, cells landing outside are dropped, and new cells are air.
+The receiver also updates `anchorOffset −= shift`. Nobody closes or re-opens
+anything, and FULL_SYNC isn't needed.
+
+A Minecraft player builds past the box with a BLOCK_EDIT in anchor
+coordinates. KSP converts each change to cell space (`cell = anchor −
+anchorOffset`) and runs it through `GridEditor.SetBlock`. If that resizes, KSP
+sends GRID_RESIZE and then the BLOCK_DELTA, both with `originSeq`. Minecraft's
+blocks don't move in the world, so applying the resize on that side changes
+bookkeeping only.
+
+If Minecraft's region can't hold the new box, it sends
+`ERROR(region_exhausted)`. KSP then closes the grid and re-opens it, which gets
+it a new region. World mapping (open decision 2) should reserve room for growth
+to avoid this.
+
+Flight grids never resize.
 
 ## Block deltas: block-state strings in a message-local table (decided by this spec)
 
@@ -308,8 +433,63 @@ Options considered:
    per change, about 7 KB per message or 140 KB/s at 20 Hz, which is negligible
    on a local socket.
 
-Deltas carry only the new state. Divergence is detected by `rev`, and by
-content hash on demand (`ACK`), not by per-cell old states.
+Deltas carry only the new state. Divergence is detected by `rev` and by content
+hash audits (ACK), not by per-cell old states.
+
+## Divergence: audits and resync
+
+**Audits** catch silent divergence, such as a bug that applies a delta wrong
+while `rev` still matches. **The sequencer only compares hashes of the same
+revision:**
+
+1. To audit, the sequencer sets ACK_REQUESTED on one sequenced frame with
+   revision R: a delta, a resize, or the last chunk of a FULL_SYNC. At that
+   moment it computes the hash of its own grid at R and stores the pair (R,
+   hash). **At most one audit per grid is outstanding.** A new one isn't
+   started until the previous ACK has arrived or the connection resets.
+2. The non-sequencer applies that frame, then hashes its grid *before applying
+   any later frame for that grid*, and replies `ACK(rev = R, hash)`.
+3. The sequencer compares only when `ACK.rev` equals the stored R. Any other
+   ACK (a stale one, or one from before a FULL_SYNC) is ignored.
+
+The alternative was to accept ACKs at any revision and compare them with the
+current revision. That fails under continuous change: a player building, or a
+redstone clock flipping every tick in flight, means the current revision has
+already moved on by the time the ACK arrives. Every audit would then "fail"
+and trigger a FULL_SYNC, forever. Keeping per-revision hashes for every
+revision would mean re-encoding the whole grid every tick. Snapshotting only
+the audited revision costs one encode per audit on each side, and it's correct
+however fast the grid changes.
+
+Audit rate: every FULL_SYNC is audited. Beyond that, at most one audit per
+5 s per grid, and only when `rev` has moved since the last one (so an idle grid
+costs nothing). Flight grids may audit less often. Hashing re-encodes the whole
+grid, which is cheap for typical grids.
+
+**On a mismatch** (same R, different hash), the sequencer sends one FULL_SYNC,
+which is itself audited. If *that* audit also mismatches, the two sides encode
+equal grids differently. That's an encoder bug, not divergence, and another
+FULL_SYNC won't fix it. The sequencer sends `ERROR(hash_disagreement)` and stops
+auditing that grid for the rest of the connection. So a hash can never cause
+more than one FULL_SYNC in a row.
+
+**Resync** handles divergence the receiver notices itself:
+
+- A non-sequencer that gets a delta or resize whose `baseRev` isn't its `rev`,
+  or a frame that fails to decode, sends **one** `RESYNC_REQUEST` and enters an
+  *awaiting sync* state. While waiting it silently drops every BLOCK_DELTA and
+  GRID_RESIZE for that grid, **without sending further requests**. A FULL_SYNC
+  of any revision ends the wait. If none arrives within 30 s (which can only
+  happen through a bug, given an ordered channel), KSP closes and re-opens the
+  grid.
+- The sequencer answers each RESYNC_REQUEST with a FULL_SYNC at a new revision
+  (current `rev` + 1). If a FULL_SYNC for that grid is already queued or being chunked
+  out, it doesn't queue another.
+- There's no livelock under continuous change. The FULL_SYNC's place in the
+  stream matches its `rev`. Deltas queued before it have older revisions and
+  are dropped by the waiting receiver. Deltas after it start at its `rev` and
+  apply. Proposals the requester sent before its request reach the sequencer
+  first, so they're included. Later ones are sequenced after the sync.
 
 ## Messages
 
@@ -332,6 +512,7 @@ connection.
 | `0x0202` | BLOCK_EDIT | non-sequencer → sequencer | handle |
 | `0x0203` | ACK | non-sequencer → sequencer | handle |
 | `0x0204` | RESYNC_REQUEST | non-sequencer → sequencer | handle |
+| `0x0205` | GRID_RESIZE | sequencer → other (editor only) | handle |
 | `0x0300` | SIGNAL_OUTPUT | MC → KSP (flight) | handle |
 | `0x0301` | SIGNAL_INPUT | KSP → MC (flight) | handle |
 | `0x0302` | SIM_STATE | KSP → MC (flight) | handle |
@@ -350,7 +531,7 @@ u16  major          1
 u16  minor          0
 u8   role           1 = KSP side, 2 = Minecraft side (fakes use the role they stand in for)
 u8   gridCodecMax   highest GridCodec version this side decodes (2)
-u32  maxFrame       largest frame this side accepts, header included (≥ 64 MiB)
+u32  maxFrame       largest frame this side accepts, header included (≥ 1 MiB)
 --- fields above are frozen across all versions ---
 u64  capabilities   bit set, none defined in 1.0 (send 0)
 str  software       e.g. "Kerblox 0.3.0 / KSP 1.12.5" or "kerblox-neoforge 0.1.0 / NeoForge 21.1.x"
@@ -363,19 +544,21 @@ refused). On failure it sends `ERROR` with a fatal code and closes.
 **BYE**: `u16 reason` (0 shutdown, 1 replaced, 2 error), `str message`. The
 sender closes after writing it.
 
-**ERROR**: `u32 refSeq` (the offending frame's seq, or 0), `u16 code`,
+**ERROR**: `u32 refSeq` (the offending frame's seq, or 0 for none), `u16 code`,
 `str message`. Codes `1`–`2` are fatal and the sender closes the connection.
 Codes from `3` up are informational and the connection stays up.
 
 | Code | Name | Fatal | Meaning |
 | --- | --- | --- | --- |
 | 1 | incompatible_version | yes | magic, major or role mismatch |
-| 2 | protocol_violation | yes | bad header, oversize frame, frame before HELLO |
+| 2 | protocol_violation | yes | bad header, frame over `maxFrame`, frame before HELLO |
 | 3 | unknown_grid | no | `grid` names no open grid |
 | 4 | bad_payload | no | a known message failed to decode; the receiver also resyncs the grid |
 | 5 | edit_rejected | no | the sequencer refused a `BLOCK_EDIT` (see rejections) |
 | 6 | grid_lost | no | Minecraft lost the grid's region; KSP should close and re-open it |
 | 7 | internal | no | unexpected failure on the sender's side |
+| 8 | region_exhausted | no | a resize doesn't fit Minecraft's region; KSP closes and re-opens the grid |
+| 9 | hash_disagreement | no | an audit right after a FULL_SYNC mismatched; audits stop for this grid |
 
 **PING** `u64 nonce, u64 sentAt` (the sender's monotonic clock, opaque to the
 receiver). **PONG** echoes both fields. A side sends PING when it has sent
@@ -387,20 +570,46 @@ On a dead peer it closes the connection, and KSP starts reconnecting.
 **GRID_OPEN** (KSP → MC):
 
 ```
-str  key       stable identity of the grid part, ≤ 256 bytes, opaque to Minecraft (P3.6 defines it)
-u16  sizeX, sizeY, sizeZ
+str  key       grid key, see below
+u16  sizeX, sizeY, sizeZ    1–256 each; must equal the seed FULL_SYNC's dimensions
 u8   mode      1 = editor, 2 = flight
 ```
 
-KSP follows it immediately with `FULL_SYNC(rev 0)`. Minecraft picks a region
-based on `(key, mode)`, so a flight copy never overwrites the editor design. It
-then replies:
+The **grid key** names the grid part stably and is safe as a file name:
 
-**GRID_READY** (MC → KSP): `u8 status` (0 ok, 1 refused), `str dimension`
-(e.g. `minecraft:overworld`), `i32 originX, originY, originZ` (world position of
-cell (0,0,0); grid axes map to world +X/+Y/+Z), `str message`. This shape fits
-both world-mapping options (open decision 2). KSP shows the location so the
-player can `/tp` there.
+- 1–64 bytes matching `^[a-z0-9][a-z0-9_-]{0,63}$`. That's lowercase only, so it
+  works on case-insensitive filesystems, and has no dots, so a suffix can be
+  appended unambiguously.
+- It's the same for the same part across KSP restarts, reconnects and editor
+  sessions. It's different for different grid parts, including two grid parts
+  on one craft. P3.6 defines the derivation (for example a hash of the craft's
+  identity and the part's persistent id; that KSP member is unverified). A
+  receiver that gets an invalid key replies `GRID_READY(refused)`.
+- The **grid id** is `<key>.<mode>`, with mode `editor` or `flight`. Minecraft
+  picks regions by grid id, so a flight copy never overwrites the editor design.
+  P3.8's render pack uses it as the file name `grids/<grid-id>.bin`.
+
+KSP follows GRID_OPEN immediately with the seed `FULL_SYNC(rev 0, anchorOffset 0)`.
+Minecraft applies it, then replies:
+
+**GRID_READY** (MC → KSP):
+
+```
+u8   status        0 ok, 1 refused
+str  dimension     e.g. "minecraft:overworld"
+i32  originX, originY, originZ   world position of anchor (0,0,0); grid axes map to world +X/+Y/+Z
+u64  seedHash      content hash of the seed as Minecraft decoded it (0 if refused)
+str  message
+```
+
+KSP compares `seedHash` with its own hash of the seed. A mismatch means the
+encoders disagree: KSP logs it and doesn't audit that grid (the same rule as
+`hash_disagreement`). This is how the seed is confirmed in both modes. ACK is
+never used for it. Minecraft sends no content frame for a grid before its
+GRID_READY. KSP, as editor sequencer, may send deltas right after the seed;
+they're applied in order. The dimension-plus-origin shape fits both
+world-mapping options (open decision 2). KSP shows the location so the player
+can `/tp` there.
 
 **GRID_CLOSE** (KSP → MC): `u8 reason` (0 editor exit, 1 part removed,
 2 vessel unloaded or destroyed). Whether Minecraft keeps the region is part of
@@ -417,9 +626,27 @@ timers) is lost. That limitation is acceptable for v1 and noted for P3.6.
 
 ### Grid content
 
-**FULL_SYNC**: `u64 rev`, `u32 codecLength`, `codecLength` bytes of `GridCodec`
-data. Dimensions must match `GRID_OPEN`. The receiver replaces its whole grid
-and sets its `rev`. The sender always sets `ACK_REQUESTED`.
+**FULL_SYNC** (chunked):
+
+```
+u64  rev
+i32  anchorOffsetX, anchorOffsetY, anchorOffsetZ
+u32  totalLength     length of the whole GridCodec payload, 1 … maxGridPayload
+u32  offset          where this chunk starts in the payload
+u32  chunkLength     ≥ 1
+chunkLength bytes
+```
+
+- Chunks go in order from offset 0, back to back. Every chunk repeats the same
+  `rev`, anchor offset and `totalLength`, and the receiver rejects
+  inconsistent chunks with `bad_payload`. Chunk sizes are chosen so each frame
+  fits the peer's `maxFrame`.
+- The sync completes with the chunk where `offset + chunkLength = totalLength`.
+  The receiver then decodes the payload, replaces its whole grid (dimensions
+  come from the payload, so they may differ from GRID_OPEN after resizes), and
+  sets `rev` and `anchorOffset`.
+- The sequencer sets ACK_REQUESTED on the last chunk of every non-seed
+  FULL_SYNC (an audit). The seed's last chunk never has it.
 
 **BLOCK_DELTA** (sequencer):
 
@@ -427,50 +654,58 @@ and sets its `rev`. The sender always sets `ACK_REQUESTED`.
 u64  baseRev     rev before this delta
 u64  rev         baseRev + 1
 u32  originSeq   seq of the BLOCK_EDIT this sequences, 0 for the sequencer's own edits
-changes
+varint stateCount; state × stateCount           distinct canonical states in this message (1 … 65536)
+varint changeCount; changeCount × { u16 x, u16 y, u16 z, varint stateIndex }    cell space
 ```
 
 **BLOCK_EDIT** (non-sequencer):
 
 ```
 u64  seenRev     last rev the proposer had applied (for logging conflicts only)
-changes
+varint stateCount; state × stateCount
+varint changeCount; changeCount × { i32 x, i32 y, i32 z, varint stateIndex }    anchor space
 ```
 
-**changes** block, shared by both:
+**GRID_RESIZE** (sequencer, editor mode only):
 
 ```
-varint  stateCount   1 … 65536
-state × stateCount   distinct canonical states in this message
-varint  changeCount  ≥ 1
-changeCount × { u16 x, u16 y, u16 z, varint stateIndex }
+u64  baseRev
+u64  rev         baseRev + 1
+u32  originSeq   as in BLOCK_DELTA
+u16  sizeX, sizeY, sizeZ    new size, 1–256 each
+i32  shiftX, shiftY, shiftZ old cell c becomes c + shift (GridEdit.ShiftX/Y/Z)
 ```
 
-Rules: coordinates are in bounds. Each cell appears at most once per message,
-and senders must not repeat one. `stateIndex < stateCount`. States that aren't
-canonical are `bad_payload` and aren't fixed up silently. A delta applies
-atomically. When an edit would touch a large share of the grid, the sequencer
-may send `FULL_SYNC` instead (it also advances `rev` by one).
+Change rules: `changeCount ≥ 1`. Delta coordinates are in bounds. Each cell
+appears at most once per message, and senders must not repeat one.
+`stateIndex < stateCount`. States that aren't canonical are `bad_payload` and
+aren't fixed up silently. A delta applies atomically.
 
-**Receiving a delta:** if `baseRev` equals the receiver's `rev`, apply it and
-set `rev`. Otherwise, or if it fails to decode, send `RESYNC_REQUEST` and
-discard further deltas for that grid until a `FULL_SYNC` arrives.
+**Receiving a delta or resize:** if `baseRev` equals the receiver's `rev`,
+apply it and set `rev`. Otherwise follow [resync](#divergence-audits-and-resync).
 
-**ACK** (non-sequencer): `u64 rev` (the receiver's current rev), `u64
-contentHash` (FNV-1a 64 of the grid's `GridCodec` v2 bytes, or 0 if not
-computed). It's sent in reply to any frame with `ACK_REQUESTED`. The hash is
-only computed when that frame was a `FULL_SYNC`, or when the sequencer sets the
-flag on a delta to audit (editor mode, at most every 5 s). Hashing re-encodes
-the whole grid, which is cheap for typical grids and too expensive to do every
-tick. The hash is well-defined because v2 encoding is canonical. If the
-sequencer sees a mismatched hash, or a `rev` ahead of its own, it sends
-`FULL_SYNC`.
+**ACK** (non-sequencer, only in reply to ACK_REQUESTED): `u64 rev` (the
+revision of the flagged frame), `u64 contentHash` (FNV-1a 64 of the grid's
+canonical encoding right after applying that frame). See
+[audits](#divergence-audits-and-resync).
 
 **RESYNC_REQUEST** (non-sequencer): `u64 haveRev`, `u8 reason` (0 rev gap,
-1 decode error, 2 hash mismatch, 3 local corruption or restart). The sequencer
-replies with `FULL_SYNC` at its current `rev`. Proposals the requester sent
-earlier arrive at the sequencer first, so they're included. Proposals sent
-later get sequenced after the sync, so nothing is lost.
+1 decode error, 2 hash mismatch, 3 local corruption or restart). It's sent once
+per divergence, as above.
+
+### Flight-mode block changes
+
+In flight, Minecraft may change any cell to any state, including air to solid
+and back: pistons extending, fluids flowing, blocks broken. Such changes travel
+as ordinary BLOCK_DELTAs, and KSP applies them to the **render** state only.
+The physical part (mass, CoM, colliders, drag cube, attach nodes) stays exactly
+as it was in the frozen copy at launch, for the life of the flight grid. *This
+is proposed, see open decision 3.* Physical changes are out of scope for
+protocol 1.0. That includes TNT splitting a craft into separate vessels
+(P4.3), and blocks that matter to physics appearing or vanishing. They'll come
+as a later minor version (for example a `GRID_SPLIT` message designed with
+P4.3). A block pushed out of the grid's box leaves the grid: Minecraft sends
+its cell as air and doesn't track it further. Flight grids never resize.
 
 ### Signals (flight)
 
@@ -485,7 +720,7 @@ addresses cells and faces.
 ```
 u64     stamp       SIGNAL_OUTPUT: Minecraft server tick; SIGNAL_INPUT: KSP counter. Increasing.
 varint  count
-count × { u16 x, u16 y, u16 z, u8 face, u8 level }
+count × { u16 x, u16 y, u16 z, u8 face, u8 level }    cell space
 ```
 
 `face` is 0 down, 1 up, 2 north, 3 south, 4 west, 5 east, or 6 for the block's
@@ -506,8 +741,9 @@ after `GRID_OPEN(flight)` is running.
 
 - **KSP:** socket I/O runs on a background thread, never on Unity's main
   thread. Received frames go into a queue that `ModuleBlockGrid` drains in
-  `Update`. Outgoing frames are queued and written by the I/O thread. No Unity
-  object is touched off the main thread.
+  `Update`, in order. Outgoing frames are queued and written by the I/O thread.
+  No Unity object is touched off the main thread. Revision assignment and
+  enqueueing happen together on the main thread.
 - **Minecraft:** I/O runs on its own thread, and every world read or write is
   handed to the server thread (verify the NeoForge 1.21.1 API for this in P3.4).
   Grid edits made by players are observed on the server thread and turned into
@@ -520,7 +756,8 @@ after `GRID_OPEN(flight)` is running.
    format above doesn't change either way.
 2. **World mapping**: one region per grid part (e.g. spaced plots in a void
    world), or one dimension per craft. `GRID_READY` carries a dimension and an
-   origin, so either fits without a protocol change.
+   origin, so either fits without a protocol change. Either way, it must leave
+   room for editor-time growth (see [Resizes](#resizes)).
 3. **Ownership during flight**: *proposed by this spec*: Minecraft is the
    sequencer and authoritative for block state, and KSP stays authoritative for
    geometry (no geometry changes in flight).

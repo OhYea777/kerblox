@@ -1,0 +1,63 @@
+{
+  "$comment": "Golden GridCodec v2 vectors, generated from Kerblox.Core GridCodec. For each: build a grid of 'size' with 'cells' set (all others air), encode it and expect exactly 'hex'; decode 'hex' and expect the same cells; FNV-1a 64 of the bytes is 'fnv1a64'. See docs/BRIDGE.md, Canonical grid encoding.",
+  "vectors": [
+    {
+      "name": "air-1",
+      "description": "1x1x1 all air: palette holds only air.",
+      "size": [1, 1, 1],
+      "cells": [],
+      "hex": "4b42475202010001000100010d6d696e6563726166743a6169720100",
+      "base64url": "S0JHUgIBAAEAAQABDW1pbmVjcmFmdDphaXIBAA",
+      "fnv1a64": "e76c0b7e8d127a2a"
+    },
+    {
+      "name": "no-air",
+      "description": "No air cell, but air is still palette entry 0.",
+      "size": [2, 1, 1],
+      "cells": [
+        { "pos": [0, 0, 0], "state": "minecraft:stone" },
+        { "pos": [1, 0, 0], "state": "minecraft:stone" }
+      ],
+      "hex": "4b42475202020001000100020d6d696e6563726166743a6169720f6d696e6563726166743a73746f6e650201",
+      "base64url": "S0JHUgICAAEAAQACDW1pbmVjcmFmdDphaXIPbWluZWNyYWZ0OnN0b25lAgE",
+      "fnv1a64": "ece50aa4e267defd"
+    },
+    {
+      "name": "order-and-props",
+      "description": "Edit order differs from storage order; palette follows first appearance in Y-major storage order; properties sorted; runs cross row ends.",
+      "size": [3, 2, 2],
+      "cells": [
+        { "pos": [2, 0, 0], "state": "minecraft:stone" },
+        { "pos": [0, 0, 1], "state": "minecraft:repeater[delay=2,facing=east,locked=false,powered=true]" },
+        { "pos": [1, 0, 1], "state": "minecraft:repeater[delay=2,facing=east,locked=false,powered=true]" },
+        { "pos": [0, 1, 0], "state": "minecraft:stone" },
+        { "pos": [2, 1, 1], "state": "create:shaft[axis=y]" }
+      ],
+      "hex": "4b42475202030002000200040d6d696e6563726166743a6169720f6d696e6563726166743a73746f6e65416d696e6563726166743a72657065617465725b64656c61793d322c666163696e673d656173742c6c6f636b65643d66616c73652c706f77657265643d747275655d146372656174653a73686166745b617869733d795d0200010102020100010104000103",
+      "base64url": "S0JHUgIDAAIAAgAEDW1pbmVjcmFmdDphaXIPbWluZWNyYWZ0OnN0b25lQW1pbmVjcmFmdDpyZXBlYXRlcltkZWxheT0yLGZhY2luZz1lYXN0LGxvY2tlZD1mYWxzZSxwb3dlcmVkPXRydWVdFGNyZWF0ZTpzaGFmdFtheGlzPXldAgABAQICAQABAQQAAQM",
+      "fnv1a64": "6b258f5160182cbe"
+    },
+    {
+      "name": "stale-palette",
+      "description": "A state that was placed then removed (dirt) leaves no palette entry.",
+      "size": [2, 1, 2],
+      "cells": [
+        { "pos": [1, 0, 1], "state": "minecraft:glass" }
+      ],
+      "hex": "4b42475202020001000200020d6d696e6563726166743a6169720f6d696e6563726166743a676c61737303000101",
+      "base64url": "S0JHUgICAAEAAgACDW1pbmVjcmFmdDphaXIPbWluZWNyYWZ0OmdsYXNzAwABAQ",
+      "fnv1a64": "315bcd270879451d"
+    },
+    {
+      "name": "multibyte-run",
+      "description": "A run of 255 air cells needs a two-byte varint (ff 01).",
+      "size": [16, 1, 16],
+      "cells": [
+        { "pos": [15, 0, 15], "state": "minecraft:gold_block" }
+      ],
+      "hex": "4b42475202100001001000020d6d696e6563726166743a616972146d696e6563726166743a676f6c645f626c6f636bff01000101",
+      "base64url": "S0JHUgIQAAEAEAACDW1pbmVjcmFmdDphaXIUbWluZWNyYWZ0OmdvbGRfYmxvY2v_AQABAQ",
+      "fnv1a64": "ca94148e30e20af9"
+    }
+  ]
+}
