@@ -387,7 +387,9 @@ The non-sequencer keeps two views of each grid:
 
 A proposal `s` is *pending* from the moment it's sent until its final echo
 (the BLOCK_DELTA with `originSeq = s`) has been applied to the mirror. The
-sequencer answers every BLOCK_EDIT with exactly one final echo. Before the
+sequencer answers every BLOCK_EDIT it can attribute with exactly one final
+echo, including malformed ones (see [Undecodable or illegal
+edits](#proposals-mirror-and-live-view) below). Before the
 echo it may send **at most one** GRID_RESIZE with the same `originSeq`: the
 composition of all the growth the proposal caused (`SetBlock` only grows, so
 the composition is itself one resize). The echo's changes are in the
@@ -399,8 +401,22 @@ into the live view, *skipping cells touched by a still-pending proposal* (the
 player's newer block stays visible). After applying the final echo of `s`, it
 also resets every cell `s` touched to the mirror's state, again skipping cells
 touched by a later pending proposal. A touched cell outside the mirror's box is
-reset to air. The live view's writes during reconciliation aren't
-observations, so they're never proposed back.
+reset to air. A **reconciliation write** is exactly that: one cell set to the
+state the proposer's model of the live view expects. The write itself is never
+proposed back. What the world does *in response* to it can be, see
+[What Minecraft proposes](#what-minecraft-proposes-in-editor-mode).
+
+The cells a frame **changed** are compared in anchor space, treating any
+position outside a box as air:
+
+- BLOCK_DELTA: the cells it lists whose state differs from the mirror's.
+- GRID_RESIZE: the non-air cells it drops. Its new cells are air, and surviving
+  cells keep their anchor position and state.
+- FULL_SYNC: every anchor position where the old mirror and the new mirror
+  differ, a plain diff of the two grids. That covers cells that only one of the
+  two boxes contains and a changed `anchorOffset`. Implementations may write
+  the whole new box and clear the whole old one instead, which gives the same
+  result.
 
 **Why this converges:** the channel is ordered, so the proposer applies every
 sequenced message in `rev` order, and its mirror equals the sequencer's grid at
@@ -428,6 +444,19 @@ needed, with no extra signalling. For each refusal the sequencer also sends
 player. A no-op change (the cell already held that state) is simply left out of
 the echo.
 
+**Undecodable or illegal edits:** "exactly one final echo" covers every
+BLOCK_EDIT the sequencer can attribute, meaning its header decoded and its
+`grid` names an open grid in a mode that takes proposals. If the payload fails
+to decode or breaks the [change rules](#grid-content), the sequencer applies
+none of it and answers with an empty final echo (`originSeq = s`) plus
+`ERROR(bad_payload, refSeq = s)`. The proposer's reset step reverts every cell
+it had shown for `s`, so a malformed proposal is never left pending forever.
+The sequencer doesn't resync anything, because its own grid isn't in doubt.
+A BLOCK_EDIT whose `grid` is unknown gets `ERROR(unknown_grid)` and no echo,
+since the proposer has no open grid for it either. One sent in the wrong
+direction or mode gets `ERROR(unexpected_message)` and no echo (see
+[Messages](#messages)).
+
 ### What Minecraft proposes in editor mode
 
 Minecraft keeps editor regions **frozen**: no scheduled block ticks, random
@@ -442,10 +471,41 @@ whatever caused it, except its own reconciliation writes. That includes:
 - the neighbour shape updates a placement triggers in the same tick (fence and
   wall connections, stair shapes, redstone wire connecting, a door's other half)
 - immediate redstone updates from a player flipping a lever
+- **the neighbour shape and redstone updates a reconciliation write triggers**
 - anything that leaks past the freeze
 
-Changes are coalesced into at most one BLOCK_EDIT per grid per server tick. A
-non-air change outside the current box is a growth proposal in anchor space.
+An *observation* is defined by state, not by call stack: a cell change in the
+region is an observation when the world's new state differs from Minecraft's
+model of the live view (mirror plus pending proposals) for that cell. A
+reconciliation write updates the model and the world to the same state, so it
+never matches. Anything it sets off, in a neighbour or in the written cell
+itself (wire recomputing its own `power`), does. **Don't implement the
+exclusion as a flag (for example a ThreadLocal) held around `level.setBlock`.**
+The updates run inside that call, so such a guard would hide them: the world
+would change while the mirror didn't, and audits, which hash the mirror, would
+never notice.
+
+Reconciliation writes use normal block updates (`Block.UPDATE_ALL`), not
+`UPDATE_CLIENTS | UPDATE_KNOWN_SHAPE`. *Why:* KSP doesn't compute connection
+shapes, so a fence, wall or wire placed from KSP arrives in whatever state KSP
+gave it. With updates suppressed, the player would see a KSP-placed fence that
+doesn't join the fence next to it, and redstone wire that ignores its
+neighbours, which is not something Minecraft ever produces. Worse, the first
+unrelated click nearby would set off the deferred updates in a burst. With
+normal updates, the Minecraft world always looks like Minecraft built it, and
+the shapes it settles on reach the craft a round trip later as ordinary
+proposals. So the craft ends with what the player saw. This converges: the echo
+of a shape proposal writes a state the world already holds, which is a no-op
+and sets off nothing further. Editor regions are frozen, so the cascade is only
+what the edit touches directly. Updates that reach blocks outside the grid's
+region aren't observations of this grid; world mapping (open decision 2) keeps
+air between regions so that doesn't happen.
+
+Changes are coalesced into one BLOCK_EDIT per grid per server tick. If that
+edit wouldn't fit the sequencer's `maxFrame`, Minecraft splits it into several
+BLOCK_EDITs sent back to back in the same tick (see [Size limits](#size-limits)),
+each a separate proposal with its own final echo. A non-air change outside the
+current box is a growth proposal in anchor space.
 
 *Why propose rather than exclude:* those effects are part of the block-state
 string (`east=true` on a fence, `power=15` on wire). Excluding them would leave
@@ -523,7 +583,18 @@ revision:**
    so KSP can't hash "resized but not yet edited". At that
    moment it computes the hash of its own grid at R and stores the pair (R,
    hash). **At most one audit per grid is outstanding.** A new one isn't
-   started until the previous ACK has arrived or the connection resets.
+   started until the previous one ends: its ACK arrives, a FULL_SYNC
+   supersedes it, or it times out.
+   - **A FULL_SYNC supersedes the outstanding audit.** Every non-seed
+     FULL_SYNC is audited, so enqueueing one replaces the stored pair with the
+     FULL_SYNC's (R, hash), whatever was outstanding. This matters when the
+     non-sequencer is awaiting a sync: it drops the audited delta, so that ACK
+     never comes, and the FULL_SYNC it asked for is what ends the wait on both
+     sides.
+   - **ACK timeout:** if no ACK for the stored R arrives within 30 s, the
+     sequencer abandons that audit, logs it, and may start the next. A timeout
+     isn't treated as a mismatch: an ordered channel only loses an ACK through
+     a bug, which resync and the next audit cover.
 2. The non-sequencer applies that frame, then hashes its **mirror** (the
    sequenced state only, never pending proposals, see
    [Proposals](#proposals-mirror-and-live-view)) *before applying any later
@@ -555,7 +626,8 @@ costs nothing). Flight grids may audit less often. Hashing re-encodes the whole
 grid, which is cheap for typical grids.
 
 **On a mismatch** (same R, different hash), the sequencer sends one FULL_SYNC,
-which is itself audited. If *that* audit also mismatches, the two sides encode
+which is itself audited. If *that* audit also mismatches (an audit of a
+FULL_SYNC sent because of a mismatch, whichever FULL_SYNC superseded it), the two sides encode
 equal grids differently. That's an encoder bug, not divergence, and another
 FULL_SYNC won't fix it. The sequencer sends `ERROR(hash_disagreement)` and stops
 auditing that grid for the rest of the connection. So a hash can never cause
@@ -568,8 +640,10 @@ more than one FULL_SYNC in a row.
   *awaiting sync* state. While waiting it silently drops every BLOCK_DELTA and
   GRID_RESIZE for that grid, **without sending further requests**. A FULL_SYNC
   of any revision ends the wait. If none arrives within 30 s (which can only
-  happen through a bug, given an ordered channel), KSP closes and re-opens the
-  grid.
+  happen through a bug, given an ordered channel), the grid is restarted. KSP
+  owns that: when KSP is the one waiting (flight), it closes and re-opens the
+  grid. When Minecraft is waiting (editor), it sends `ERROR(grid_lost)` for
+  the grid, and KSP closes and re-opens it.
 - A dropped BLOCK_DELTA can be the final echo of one of the proposer's own
   proposals. The proposer still reads the `originSeq` of every BLOCK_DELTA it
   drops, and marks that proposal *echo-dropped*. Its effect, if accepted, is
@@ -616,6 +690,15 @@ connection.
 Ranges: `0x00xx` connection, `0x01xx` grid lifecycle, `0x02xx` grid content,
 `0x03xx` signals (energy and fluids will be added to this range later).
 
+A known message that breaks the Direction or `grid` columns gets
+`ERROR(unexpected_message, refSeq)` and is otherwise ignored. That covers a
+message from the wrong side, a sequencer-only message from the non-sequencer
+(or the reverse) for that grid's mode, a GRID_RESIZE or SIGNAL_* on a grid of
+the wrong mode, a connection message with `grid ≠ 0`, and a grid message with
+`grid = 0`. A grid message whose nonzero handle isn't open gets
+`ERROR(unknown_grid)` instead. GRID_OPEN reusing a handle on this connection
+gets `GRID_READY(refused)`.
+
 ### Connection
 
 **HELLO** is the first frame in each direction. Both sides send it immediately
@@ -649,17 +732,36 @@ Codes from `3` up are informational and the connection stays up.
 | 1 | incompatible_version | yes | magic, major or role mismatch |
 | 2 | protocol_violation | yes | bad header, frame over `maxFrame`, frame before HELLO |
 | 3 | unknown_grid | no | `grid` names no open grid |
-| 4 | bad_payload | no | a known message failed to decode; the receiver also resyncs the grid |
+| 4 | bad_payload | no | a known message failed to decode or broke its rules; what follows depends on the message, see below |
 | 5 | edit_rejected | no | the sequencer refused a `BLOCK_EDIT` (see rejections) |
 | 6 | grid_lost | no | Minecraft lost the grid's region; KSP should close and re-open it |
 | 7 | internal | no | unexpected failure on the sender's side |
 | 8 | region_exhausted | no | a resize doesn't fit Minecraft's region; KSP closes and re-opens the grid |
 | 9 | hash_disagreement | no | an audit right after a FULL_SYNC mismatched; audits stop for this grid |
+| 10 | unexpected_message | no | a known message in the wrong direction or mode, or with a `grid` field its type doesn't allow; it's ignored |
+
+After a `bad_payload`, the receiver of the bad frame recovers by its role:
+
+- **Non-sequencer**, bad BLOCK_DELTA, GRID_RESIZE or FULL_SYNC chunk: it can't
+  trust its mirror, so it also sends `RESYNC_REQUEST(decode error)` (see
+  [resync](#divergence-audits-and-resync)).
+- **Sequencer**, bad BLOCK_EDIT: an empty final echo for it (see
+  [Undecodable or illegal edits](#proposals-mirror-and-live-view)). The
+  sequencer never sends RESYNC_REQUEST.
+- **Sequencer**, bad ACK: the audit is abandoned, as on a timeout. Bad
+  RESYNC_REQUEST: treated as a valid one, so a FULL_SYNC follows.
+- Anything else (GRID_OPEN, signals, SIM_STATE): the frame is dropped. A bad
+  GRID_OPEN is answered with `GRID_READY(refused)`.
 
 **PING** `u64 nonce, u64 sentAt` (the sender's monotonic clock, opaque to the
 receiver). **PONG** echoes both fields. A side sends PING when it has sent
 nothing for 1 s, and treats the peer as dead after 5 s with nothing received.
 On a dead peer it closes the connection, and KSP starts reconnecting.
+
+PING, PONG and the liveness clock live **on the I/O thread**: it answers PING
+directly and counts any received frame as liveness, without going through the
+main-thread queue. A KSP scene load or a long Minecraft tick can stall the main
+thread for well over 5 s, and that mustn't look like a dead peer.
 
 ### Grid lifecycle
 
@@ -686,7 +788,11 @@ The **grid key** names the grid part stably and is safe as a file name:
   P3.8's render pack uses it as the file name `grids/<grid-id>.bin`.
 
 KSP follows GRID_OPEN immediately with the seed `FULL_SYNC(rev 0, anchorOffset 0)`.
-Minecraft applies it, then replies:
+Minecraft applies it, then replies. Regions are picked by grid id, so a region
+can be reused with blocks left over from an earlier session. Applying the seed
+therefore sets **every cell of the region outside the seeded box to air**, not
+just the box, with reconciliation writes. Otherwise stale blocks would look like
+part of the craft, and breaking them would be proposed as edits.
 
 **GRID_READY** (MC → KSP):
 
@@ -791,8 +897,10 @@ right after applying that frame, without pending proposals). See
 [audits](#divergence-audits-and-resync).
 
 **RESYNC_REQUEST** (non-sequencer): `u64 haveRev`, `u8 reason` (0 rev gap,
-1 decode error, 2 hash mismatch, 3 local corruption or restart). It's sent once
-per divergence, as above.
+1 decode error, 2 local state lost, for example Minecraft finding its region
+changed under it). It's sent once per divergence, as above. Hash mismatches
+aren't a reason: only the sequencer compares hashes, and it answers a mismatch
+with a FULL_SYNC directly.
 
 ### Flight-mode block changes
 
@@ -842,7 +950,8 @@ editor regions are always frozen (see [What Minecraft proposes](#what-minecraft-
 ## Threading notes for implementers
 
 - **KSP:** socket I/O runs on a background thread, never on Unity's main
-  thread. Received frames go into a queue that `ModuleBlockGrid` drains in
+  thread. It answers PING itself (see [Connection](#connection)). Other
+  received frames go into a queue that `ModuleBlockGrid` drains in
   `Update`, in order. Outgoing frames are queued and written by the I/O thread.
   No Unity object is touched off the main thread. Revision assignment and
   enqueueing happen together on the main thread.
@@ -850,7 +959,9 @@ editor regions are always frozen (see [What Minecraft proposes](#what-minecraft-
   handed to the server thread (verify the NeoForge 1.21.1 API for this in P3.4).
   Cell changes are observed on the server thread and turned into
   `BLOCK_EDIT` (editor, see [What Minecraft proposes](#what-minecraft-proposes-in-editor-mode))
-  or `BLOCK_DELTA` (flight). Reconciliation writes are excluded.
+  or `BLOCK_DELTA` (flight). Reconciliation writes are excluded by comparing
+  against the live-view model, not by a guard around `setBlock`, so the updates
+  they set off are still observed.
 
 ## Open decisions
 

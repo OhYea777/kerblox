@@ -25,7 +25,8 @@
     "resyncTimeoutMs": 30000,
     "fnv1a64OffsetBasis": "cbf29ce484222325",
     "fnv1a64Prime": "100000001b3",
-    "seqWrapsTo": 1
+    "seqWrapsTo": 1,
+    "auditAckTimeoutMs": 30000
   },
   "flags": {
     "ACK_REQUESTED": 1
@@ -89,6 +90,10 @@
     "HASH_DISAGREEMENT": {
       "value": 9,
       "fatal": false
+    },
+    "UNEXPECTED_MESSAGE": {
+      "value": 10,
+      "fatal": false
     }
   },
   "byeReasons": {
@@ -112,8 +117,7 @@
   "resyncReasons": {
     "REV_GAP": 0,
     "DECODE_ERROR": 1,
-    "HASH_MISMATCH": 2,
-    "LOCAL_RESET": 3
+    "LOCAL_STATE_LOST": 2
   },
   "simStates": {
     "RUNNING": 1,
