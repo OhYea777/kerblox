@@ -57,7 +57,7 @@ with correct mass, CoM and drag.
 - **Acceptance:** `scripts/deploy.sh` installs into a clean KSP; CI green.
 
 ### P1.5: Correct inertia tensor for mixed-density grids
-- **Status:** todo
+- **Status:** review
 - **Depends on:** P1.3
 - **Gate:** in-game
 - **Scope:** Unity derives `rb.inertiaTensor` from colliders assuming uniform
