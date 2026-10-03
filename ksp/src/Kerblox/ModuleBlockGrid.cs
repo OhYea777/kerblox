@@ -44,7 +44,8 @@ namespace Kerblox
         public int colliderCount;
 
         private static BlockRegistry registry;
-        internal static BlockRegistry Registry => registry ?? (registry = BlockRegistry.CreateDefault());
+        /// <summary>Built once, on first use during part compilation, with GameData's KERBLOX_BLOCK rules.</summary>
+        internal static BlockRegistry Registry => registry ?? (registry = BlockConfig.CreateRegistry()) ?? BlockRegistry.CreateDefault();
 
         private VoxelGrid grid;
         private MassProperties massProps;

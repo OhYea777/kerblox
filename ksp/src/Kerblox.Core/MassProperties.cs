@@ -30,8 +30,8 @@ namespace Kerblox.Core
                 for (int z = 0; z < grid.SizeZ; z++)
                     for (int x = 0; x < grid.SizeX; x++)
                     {
-                        BlockType t = registry.Get(grid.Get(x, y, z));
-                        if (t == null || !t.Solid) continue;
+                        BlockPhysics t = registry.GetPhysics(grid.Get(x, y, z));
+                        if (!t.Solid) continue;
 
                         solid++;
                         if (x < minX) minX = x; if (y < minY) minY = y; if (z < minZ) minZ = z;

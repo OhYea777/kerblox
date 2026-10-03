@@ -67,6 +67,17 @@ to `ilspycmd -p` output and are only a rough guide.
 | `Part.FindAttachNode(string)` exists | Verified by compile |
 | Moving a node with a part attached doesn't move that part | Unverified (Procedural Parts moves attached parts manually, see P2.2) |
 
+## Config loading (`GameDatabase`)
+
+| Fact | Status |
+| --- | --- |
+| `GameDatabase.Instance.GetConfigs(string typeName)` returns `UrlDir.UrlConfig[]` for every top-level node of that name across GameData | Verified (`GameDatabase.GetConfigs` → `UrlDir.GetConfigs`, matches `UrlConfig.type`) |
+| `UrlConfig` has public `config` (`ConfigNode`), `parent` (`UrlFile`) and `url`; `UrlFile.url` is the file's GameData-relative url | Verified (`UrlDir.UrlConfig`, `UrlDir.UrlFile`) |
+| `ConfigNode.values` is a `ValueList` (non-generic `IEnumerable` of `ConfigNode.Value` with public `name`, `value`), in file order, duplicates kept | Verified (`ConfigNode.ValueList`) |
+| The database is loaded before parts compile: `PartLoader` reads parts with `GameDatabase.Instance.GetConfigs("PART")`, so custom nodes are readable from a module's OnLoad during compilation | Verified (`PartLoader`) |
+| Order of `GetConfigs` results across different cfg files (assumed directory/alphabetical) | Unverified; Kerblox's "later node wins" between same-name rules depends on it |
+| Changing `KERBLOX_BLOCK` values changes part mass after a restart | In-game, P1.6 |
+
 ## Open questions
 
 - Maximum length of a ConfigNode value in craft and save files (`gridData`). See P2.4.

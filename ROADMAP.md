@@ -69,7 +69,7 @@ with correct mass, CoM and drag.
   asymmetric grid's rotation response matches expectation (document the test).
 
 ### P1.6: Block physics from config
-- **Status:** todo
+- **Status:** review
 - **Depends on:** P1.8
 - **Gate:** in-game
 - **Scope:** load per-block physical properties (density, solid) from

@@ -14,11 +14,19 @@ namespace Kerblox.Core
         /// </summary>
         public string Name { get; }
 
-        /// <summary>Tonnes per cubic metre (KSP mass units). Game-balanced, not realistic.</summary>
-        public double Density { get; }
+        /// <summary>
+        /// Tonnes per cubic metre (KSP mass units). Game-balanced, not realistic.
+        /// Overridden by <c>KERBLOX_BLOCK</c> rules once the registry applies them.
+        /// </summary>
+        public double Density { get; private set; }
 
-        /// <summary>Contributes mass and collision.</summary>
-        public bool Solid { get; }
+        /// <summary>Contributes mass and collision. Overridable like <see cref="Density"/>.</summary>
+        public bool Solid { get; private set; }
+
+        /// <summary>The values passed to the constructor, which rules fall back to.</summary>
+        public BlockPhysics BuiltInPhysics { get; }
+
+        public BlockPhysics Physics => new BlockPhysics(Density, Solid);
 
         /// <summary>Hides the faces of neighbouring blocks.</summary>
         public bool Opaque { get; }
@@ -35,7 +43,14 @@ namespace Kerblox.Core
                          byte r, byte g, byte b, TilePattern pattern = TilePattern.Noise)
         {
             Name = name; Density = density; Solid = solid; Opaque = opaque;
+            BuiltInPhysics = new BlockPhysics(density, solid);
             R = r; G = g; B = b; Pattern = pattern;
+        }
+
+        internal void SetPhysics(BlockPhysics physics)
+        {
+            Density = physics.Density;
+            Solid = physics.Solid;
         }
 
         public override string ToString() => Name;
@@ -45,6 +60,10 @@ namespace Kerblox.Core
     {
         private readonly Dictionary<string, BlockType> byName = new Dictionary<string, BlockType>(StringComparer.Ordinal);
         private readonly List<BlockType> ordered = new List<BlockType>();
+        private BlockPhysicsRules rules = BlockPhysicsRules.Empty;
+
+        /// <summary>The physics rules last passed to <see cref="ApplyPhysics"/>.</summary>
+        public BlockPhysicsRules PhysicsRules => rules;
 
         public IReadOnlyList<BlockType> Types => ordered;
         public int TileCount => ordered.Count;
@@ -56,6 +75,7 @@ namespace Kerblox.Core
             if (type.Name == BlockState.AirName) throw new ArgumentException("Air can't be registered", nameof(type));
             if (byName.ContainsKey(type.Name)) throw new ArgumentException($"Duplicate block name {type.Name}", nameof(type));
             type.TileIndex = ordered.Count;
+            type.SetPhysics(rules.Resolve(type.Name, type.BuiltInPhysics));
             byName.Add(type.Name, type);
             ordered.Add(type);
             return type;
@@ -69,7 +89,36 @@ namespace Kerblox.Core
 
         public BlockType Get(string name) => byName.TryGetValue(name, out var t) ? t : null;
 
-        public bool IsSolid(BlockState state) => Get(state)?.Solid ?? false;
+        /// <summary>
+        /// Replaces the physics rules. Registered types take their
+        /// <see cref="BlockType.Density"/> and <see cref="BlockType.Solid"/> from the rules
+        /// (falling back to their built-in values), and unknown blocks resolve through
+        /// <see cref="GetPhysics"/>. Applying again starts from the built-in values.
+        /// </summary>
+        public void ApplyPhysics(BlockPhysicsRules physicsRules)
+        {
+            rules = physicsRules ?? BlockPhysicsRules.Empty;
+            foreach (BlockType t in ordered)
+                t.SetPhysics(rules.Resolve(t.Name, t.BuiltInPhysics));
+        }
+
+        /// <summary>
+        /// Mass and collision properties for any state, including blocks the registry
+        /// doesn't know (which get the matching wildcard rule, else
+        /// <see cref="BlockPhysics.None"/>). This is the lookup mass and collider code
+        /// should use; <see cref="Get(BlockState)"/> covers known types only.
+        /// </summary>
+        public BlockPhysics GetPhysics(BlockState state)
+        {
+            if (state.IsAir) return BlockPhysics.None;
+            BlockType t = Get(state.Name);
+            return t != null ? t.Physics : rules.Resolve(state.Name, BlockPhysics.None);
+        }
+
+        /// <summary>Mass in tonnes of one block of <paramref name="state"/>; zero unless solid.</summary>
+        public double BlockMass(BlockState state, double blockVolume) => GetPhysics(state).Mass(blockVolume);
+
+        public bool IsSolid(BlockState state) => GetPhysics(state).Solid;
         public bool IsOpaque(BlockState state) => Get(state)?.Opaque ?? false;
 
         /// <summary>
@@ -103,6 +152,10 @@ namespace Kerblox.Core
             }
         }
 
+        /// <summary>
+        /// The built-in blocks with their built-in physics. GameData/Kerblox/Blocks.cfg
+        /// ships the same values; keep the two in sync.
+        /// </summary>
         public static BlockRegistry CreateDefault()
         {
             var r = new BlockRegistry();
