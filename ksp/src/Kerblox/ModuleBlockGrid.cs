@@ -226,6 +226,85 @@ namespace Kerblox
         /// <summary>Clears one cell to air. Never resizes the grid.</summary>
         public GridEdit RemoveBlock(int x, int y, int z) => SetBlock(x, y, z, BlockState.Air);
 
+        /// <summary>
+        /// <see cref="SetBlock"/> on this part, then the same edit on every symmetry
+        /// counterpart that is also a block grid, so parts placed in symmetry stay
+        /// copies of each other. Counterparts are edited only when this part changed.
+        ///
+        /// Which cell a counterpart gets (verified against KSP 1.12.5, see
+        /// docs/KSP-API-NOTES.md): radial counterparts are rotated copies with the same
+        /// local frame, so the same cell. Mirror counterparts are rotated, not scaled
+        /// (the part has no <c>mirrorRefAxis</c>), so one local axis comes out flipped;
+        /// <see cref="MirrorMap"/> works out which, and the edit lands on the mirror
+        /// image of the cell. Block states are copied as they are: a block with a
+        /// facing isn't turned to match the mirror.
+        /// </summary>
+        public GridEdit SetBlockWithSymmetry(int x, int y, int z, BlockState state)
+        {
+            EnsureGrid();
+            // Work out every counterpart's cell first: this part's edit may move parts
+            // (AttachmentKeeper) and re-centre this grid.
+            var targets = new List<KeyValuePair<ModuleBlockGrid, Int3>>();
+            var cell = new Int3(x, y, z);
+            var layout = new BlockLayout(grid, blockSize);
+            foreach (Part cp in part.symmetryCounterparts)
+            {
+                if (cp == null) continue;
+                ModuleBlockGrid other = cp.FindModuleImplementing<ModuleBlockGrid>();
+                if (other == null) continue;
+                other.EnsureGrid();
+                AxisMap map = AxisMap.Identity;
+                if (part.symMethod == SymmetryMethod.Mirror && !MirrorMap(other, out map))
+                {
+                    Log.Warn($"Can't relate {cp.partInfo?.name} to its mirror counterpart's grid; not editing it");
+                    continue;
+                }
+                var otherLayout = new BlockLayout(other.grid, other.blockSize);
+                targets.Add(new KeyValuePair<ModuleBlockGrid, Int3>(other, map.MapCell(cell, layout, otherLayout)));
+            }
+
+            GridEdit edit = SetBlock(x, y, z, state);
+            if (!edit.Changed) return edit;
+
+            foreach (KeyValuePair<ModuleBlockGrid, Int3> t in targets)
+            {
+                ModuleBlockGrid other = t.Key;
+                Int3 c = t.Value;
+                // Same rule as build mode: never empty a grid, it couldn't be clicked again.
+                if (state.IsAir && other.blockCount <= 1 && !other.GetBlock(c.X, c.Y, c.Z).IsAir) continue;
+                GridEdit e = other.SetBlock(c.X, c.Y, c.Z, state);
+                if (e.Status == GridEditStatus.TooLarge)
+                    Log.Warn($"Symmetry counterpart {other.part.partInfo?.name} can't take the edit at {c}");
+            }
+            return edit;
+        }
+
+        /// <summary>
+        /// The cell map from this grid to a mirror counterpart's. KSP builds the
+        /// counterpart by reflecting the part's position and up/forward axes through a
+        /// plane, so the plane's normal is the direction between the two parts, and
+        /// stays so after either one is moved or rotated in symmetry. Falls back to
+        /// the root part's right axis (KSP's mirror plane when placing) if the parts
+        /// coincide.
+        /// </summary>
+        private bool MirrorMap(ModuleBlockGrid other, out AxisMap map)
+        {
+            Transform a = GridRoot, b = other.GridRoot;
+            if (a == null || b == null)
+            {
+                map = default;
+                return false;
+            }
+            Vector3 normal = other.part.transform.position - part.transform.position;
+            if (normal.sqrMagnitude < 1e-6f && EditorLogic.RootPart != null)
+                normal = EditorLogic.RootPart.transform.right;
+            return AxisMap.TryFromMirror(Axes(a), Axes(b), ToFloat3(normal), 0.02f, out map);
+        }
+
+        private static Float3[] Axes(Transform t) => new[] { ToFloat3(t.right), ToFloat3(t.up), ToFloat3(t.forward) };
+
+        private static Float3 ToFloat3(Vector3 v) => new Float3(v.x, v.y, v.z);
+
         #endregion
 
         #region Build mode

@@ -115,7 +115,25 @@ to `ilspycmd -p` output and are only a rough guide.
 | `KSP/Alpha/Unlit Transparent` takes its tint from `_Color` | Verified (`PartReader` sets `_Color` on it); looks right in-game: In-game, P2.3 |
 | Other `EditorLogic` left-click handlers in idle place mode do nothing harmful while `EDITOR_PAD_PICK_PLACE` is locked | In-game, P2.3 |
 
+## Undo, symmetry and craft files (P2.4)
+
+| Fact | Status |
+| --- | --- |
+| `ShipConstruction.CreateBackup(ship)` appends `ship.SaveShip()` (a full craft `ConfigNode`) to the static `ShipConstruction.backups` list | Verified (`ShipConstruction` ~line 430) |
+| Undo/redo (`EditorLogic.RestoreState(int)`): `DestroyImmediate(rootPart.gameObject)` (the whole attached tree), then `ShipConstruction.RestoreBackup(undoLevel - 1)`, which runs `new ShipConstruct().LoadShip(backup)`, then fires `onEditorRestoreState`, `onEditorShipModified`, `onEditorUndo` | Verified (`EditorLogic.RestoreState` ~line 8064, `ShipConstruction.RestoreBackup` ~line 461) |
+| `ShipConstruct.LoadShip` instantiates each part from `partInfo.partPrefab`, applies the PART values (`attN` sets node `position`/`originalPosition`, `mir` calls `SetMirror`), then `Part.LoadModule` per MODULE node, which calls `PartModule.Load`: `Fields.Load` (so `gridData`), events, actions, then `OnLoad`. Parenting, `symmetryCounterparts` and `InitializeModules` follow. So undo, redo, craft load and save load all rebuild a grid through `OnLoad` from the snapshot's `gridData`; `OnStart` runs later from `Part.Start` (`ModulesOnStart`) | Verified (`ShipConstruct.LoadShip` ~lines 1888-2626, `Part.LoadModule` ~line 17015, `PartModule.Load` ~line 1964, `Part.Start` ~line 4586) |
+| `ShipConstruct.SaveShip` writes each module with `PartModule.Save`: `Fields.Save` (only `isPersistant` fields), then `Events.OnSave`, which skips every event whose `isPersistent` is false (the `KSPEvent` default). So a PAW label changed at runtime (build mode's "Stop building") never reaches a snapshot or craft file | Verified (`BaseFieldList.Save` ~line 930, `BaseEventList.OnSave` ~line 763, `KSPEvent` ctor) |
+| `Part.symmetryCounterparts` (`List<Part>`) holds every *other* part of the symmetry group, on each member; `Part.symMethod` is `SymmetryMethod.Radial` or `Mirror` | Verified (`Part` ~line 1969, `EditorLogic.UpdatePartAndChildren`) |
+| `Part.FindModuleImplementing<T>()` returns the first module that `is T`, or null | Verified (`Part` ~line 17221) |
+| Symmetry counterparts are `Object.Instantiate` clones (`EditorLogic.DuplicatePart`), so they start with the source's serialised fields, `gridData` included, and rebuild their grid in `OnStart` | Verified (`EditorLogic.DuplicatePart` ~line 8882) |
+| Radial counterparts: rotation = `Q * source.rotation` with `Q` a rotation about the root's (or parent's) up axis, position rotated the same way. Same local frame, so the same grid cell is the same block | Verified (`EditorLogic.UpdateSymmetry` ~line 10044) |
+| Mirror counterparts: position reflected through the plane through the first non-symmetrical parent with normal `rootPart.transform.right`; rotation = `LookRotation(reflected forward, reflected up)`, sometimes turned another 180° about up for surface attachment. A rotation, not a reflection, so the counterpart's local x (or z after the extra turn) points the opposite way from the mirror image of the source's | Verified (`EditorLogic.UpdateSymmetry` ~line 9932) |
+| `Part.SetMirror` scales the `model` transform by `mirrorVector` only via `updateMirroring`, which returns early when the part cfg has no `mirrorRefAxis`. The grid part has none, so its `mirrorVector` stays (1,1,1) and its geometry is never actually mirrored | Verified (`Part.updateMirroring` ~line 20053, `SetMirror` ~line 20126) |
+| A ConfigNode value has no length limit: `ConfigNode.Load` reads lines with `File.ReadAllLines`; `PreFormatConfig` only cuts at `//`, splits at `{`/`}` and trims; `CustomEqualSplit` splits at the first `=`; the writer emits `indent + name + " = " + value` on one line after `CleanupInput` drops CR/LF and turns tabs into spaces. base64url contains none of those characters | Verified (`ConfigNode` ~lines 2373, 7446, 8194, 8469, 8601) |
+| A string `KSPField` is copied as-is by `Fields.Load`/`Save`, no length check | Verified (`BaseField`, `BaseFieldList`) |
+| Practical limits on `gridData` length (load time, memory of undo snapshots, the craft browser reading big files) | In-game, P2.4 |
+
 ## Open questions
 
-- Maximum length of a ConfigNode value in craft and save files (`gridData`). See P2.4.
+- How large a `gridData` the game handles comfortably (no format limit exists, see above). In-game, P2.4.
 - Whether editor raycasts for surface attach hit child box colliders on the part's layer. In-game, P1.3.
