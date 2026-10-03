@@ -41,6 +41,12 @@ them with the user instead.
   the wild depend on it.
 - **Block ids are stable.** Never renumber `BlockRegistry.Ids`; 0 is air.
   Block names match Minecraft's namespaced ids so the bridge maps 1:1.
+  (P1.8 replaces fixed ids with per-grid palettes of block-state strings.)
+- **Minecraft renders, KSP replays.** Never parse Minecraft models in C#.
+  Modded-block appearance comes from client-exported render packs
+  ([docs/RENDERING.md](docs/RENDERING.md)). Render packs contain Mojang and mod
+  textures: they live in `~/.cache/kerblox/` and must never be committed or
+  shipped.
 - **Nothing ships to GameData that targets anything but `net48`**, and nothing
   may reference `netstandard.dll` (KSP's Managed folder has no facade for it).
 

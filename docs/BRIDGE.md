@@ -38,6 +38,9 @@ Taken from [SkyCraft](https://github.com/chasmlol/SkyCraft):
 - **Dedicated server** (not a headless client): redstone and machine logic are
   server-side anyway.
 
+Rendering data does not flow through the bridge protocol: the client writes
+render packs straight to the local cache. See [RENDERING.md](RENDERING.md).
+
 ## Open decisions
 
 1. **Transport**: a Unix domain socket (simple framing, natural

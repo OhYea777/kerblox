@@ -75,7 +75,7 @@ minecraft/                    (phase 3) NeoForge 1.21.1 bridge mod (Gradle)
 protocol/                     (phase 3) bridge protocol spec + shared constants for both sides
 tools/                        (phase 3) fake KSP and fake Minecraft stand-ins
 scripts/                      deploy.sh, ksp-logs.sh, ksp-decompile.sh, worktree-setup.sh
-docs/                         architecture, KSP API notes, in-game testing, bridge design
+docs/                         architecture, rendering, KSP API notes, in-game testing, bridge design
 .agents/skills/               agent skills (also exposed as .claude/skills)
 ```
 

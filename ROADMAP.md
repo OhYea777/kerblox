@@ -68,26 +68,47 @@ with correct mass, CoM and drag.
 - **Acceptance:** Core tests against analytic box inertia; in game, an
   asymmetric grid's rotation response matches expectation (document the test).
 
-### P1.6: Block registry from config
+### P1.6: Block physics from config
+- **Status:** todo
+- **Depends on:** P1.8
+- **Gate:** in-game
+- **Scope:** load per-block physical properties (density, solid) from
+  `KERBLOX_BLOCK {}` ConfigNodes in GameData, keyed by Minecraft block name,
+  with wildcard rules (`mekanism:*`) and a default for unknown modded blocks.
+  Ship the current defaults as a cfg. The parser lives in Core and doesn't
+  depend on KSP's ConfigNode (the plugin adapts it).
+- **Acceptance:** Core parser and rule-precedence tests; changing a density in
+  the cfg changes part mass in the VAB.
+
+### P1.7: Model-driven mesher
+- **Status:** todo
+- **Depends on:** P1.8
+- **Gate:** in-game
+- **Scope:** generalise `GridMesher` from fixed cubes to per-state models:
+  quads grouped by cull face, per-state occlusion flags, render layers
+  (solid / cutout / translucent as submeshes), tint colour, multiple atlases.
+  The current procedural cube and atlas become the built-in model source, and
+  the map-colour cube becomes the fallback for unknown states. See
+  [docs/RENDERING.md](docs/RENDERING.md).
+- **Acceptance:** Core tests for cull-face culling against occluding and
+  non-occluding neighbours, layer separation and fallback; the default capsule
+  looks unchanged in the VAB.
+
+### P1.8: Palette-based grid format (codec v2)
 - **Status:** todo
 - **Depends on:** P1.3
-- **Gate:** in-game
-- **Scope:** load block types from `KERBLOX_BLOCK {}` ConfigNodes in GameData
-  (id, name, density, solid, opaque, colour, pattern), with the current
-  defaults shipped as a cfg. Keep Core's registry API; add a parser that
-  doesn't depend on KSP's ConfigNode (plugin adapts). Reject id 0 and
-  duplicates with a clear `[Kerblox]` error.
-- **Acceptance:** Core parser tests; changing a density in the cfg changes
-  part mass in the VAB.
-
-### P1.7: Real block textures
-- **Status:** todo
-- **Depends on:** P1.6
-- **Gate:** in-game
-- **Scope:** optional per-block PNG tiles (16×16) loaded through GameDatabase,
-  falling back to the procedural pattern. Original art or a compatible
-  licence only; no Mojang assets.
-- **Acceptance:** textured blocks in VAB; missing PNG falls back without errors.
+- **Gate:** none
+- **Scope:** replace fixed 16-bit type ids with a per-grid **palette** of
+  canonical Minecraft block-state strings (`ns:block[prop=val,...]`,
+  properties sorted). Cells store palette indices, and index 0 is
+  `minecraft:air`, as in Minecraft's own chunk palettes. This is needed for
+  arbitrary modded blocks. `GridCodec` v2 writes the palette then the RLE
+  indices, and still decodes v1 (map the old ids to their names). Change
+  events and revisions stay as they are. Do this before P2.1, while the only
+  grids in the wild are the hardcoded default.
+- **Acceptance:** Core tests: palette round-trip, canonical ordering, v1 → v2
+  migration, palette compaction after removals; the plugin builds and loads
+  an old v1 `gridData`.
 
 ---
 
@@ -97,7 +118,7 @@ Goal: place and remove blocks on the grid part inside the VAB/SPH.
 
 ### P2.1: Grid editing API in ModuleBlockGrid
 - **Status:** todo
-- **Depends on:** P1.3
+- **Depends on:** P1.8
 - **Gate:** none
 - **Scope:** `SetBlock`/`RemoveBlock` on the module that edits the grid,
   re-encodes `gridData`, rebuilds geometry, marks the drag cube dirty and fires
@@ -154,11 +175,13 @@ AE2) run alongside it, and its capability API (energy, fluid and item handlers)
 gives one generic way into every mod's machines.
 Pattern from [SkyCraft](https://github.com/chasmlol/SkyCraft): one shared
 protocol header, plus a fake stand-in for each side so each half can be tested
-alone. Draft design: [docs/BRIDGE.md](docs/BRIDGE.md).
+alone. Draft design: [docs/BRIDGE.md](docs/BRIDGE.md). Rendering modded blocks
+exactly as they look in Minecraft: [docs/RENDERING.md](docs/RENDERING.md)
+(P3.7–P3.12).
 
 ### P3.1: Protocol specification
 - **Status:** todo
-- **Depends on:** P1.1
+- **Depends on:** P1.8
 - **Gate:** none
 - **Scope:** finalise docs/BRIDGE.md: transport choice (Unix socket vs
   `/dev/shm` ring buffers), header layout, versioning, message set (hello,
@@ -210,6 +233,74 @@ alone. Draft design: [docs/BRIDGE.md](docs/BRIDGE.md).
 - **Scope:** editor-only sync between `ModuleBlockGrid` and the bridge;
   handles connect/disconnect and conflicting edits by revision.
 - **Acceptance:** with FakeMinecraft, edits round-trip in the VAB; then with the real client.
+
+### P3.7: Render pack format specification
+- **Status:** todo
+- **Depends on:** P1.7
+- **Gate:** none
+- **Scope:** specify the render pack in `protocol/render-pack.md`: manifest
+  (pack id = hash of mods and resource packs), compact atlases with animation
+  metadata, the state-model binary, per-grid placed-model overrides, and
+  versioning. Shared constants for C# and Java. Cache location
+  `~/.cache/kerblox/renderpacks/<pack-id>/`, never inside GameData.
+- **Acceptance:** spec merged; C# reader and writer round-trip tests in Core
+  against hand-built fixtures.
+
+### P3.8: Client-side render exporter
+- **Status:** todo
+- **Depends on:** P3.4, P3.7
+- **Gate:** none
+- **Scope:** NeoForge client code that, when the player joins the server (and
+  via a `/kerblox export` command), exports every grid region the server
+  announces. For each block: baked-model quads queried with the block's real
+  `ModelData`, neighbours and render type; tints resolved at the block's real
+  position; sprites copied into compact atlases. Writes state models where the
+  model depends only on the block state, and placed models where it depends on
+  world context (connected textures, neighbours). Verify the exact NeoForge
+  1.21.1 model APIs from its sources before relying on them.
+- **Acceptance:** export of a test world with vanilla stairs, fences, glass
+  panes, grass (tinted), leaves (cutout), stained glass (translucent) and a
+  connected-texture block; golden-file tests of the emitted quads.
+
+### P3.9: Block entity renderer capture
+- **Status:** todo
+- **Depends on:** P3.8
+- **Gate:** none
+- **Scope:** capture BER output (chests, Mekanism machines' dynamic parts,
+  Create kinetics with Flywheel's backend off) by rendering into a recording
+  `MultiBufferSource` and converting the triangles to placed-model geometry.
+  Re-export when the block entity's state changes, throttled.
+- **Acceptance:** a vanilla chest and a Mekanism energy cube export non-empty
+  geometry; a fluid tank's level change produces a new snapshot.
+
+### P3.10: KSP render pack loader and layered shaders
+- **Status:** todo
+- **Depends on:** P1.7, P3.7
+- **Gate:** in-game
+- **Scope:** load render packs at KSP startup and on change, feed them into the
+  model-driven mesher, and pick the pack whose id matches the grid's server.
+  Add cutout and translucent submeshes with KSP shaders verified by decompile.
+  Fall back to the map-colour cube when there's no export.
+- **Acceptance:** a grid exported from the test world renders in the VAB with
+  correct textures, tints, culling and transparency.
+
+### P3.11: Animated and emissive textures
+- **Status:** todo
+- **Depends on:** P3.10
+- **Gate:** in-game
+- **Scope:** play exported texture animations (frame strips and timings) by
+  updating UVs or atlas regions; mark emissive quads (lit lamps, glowstone,
+  machine screens) to render with KSP's emissive property.
+- **Acceptance:** lava, water and a lit redstone lamp animate or glow in the VAB.
+
+### P3.12: Fidelity check against the live server
+- **Status:** todo
+- **Depends on:** P3.8, P3.9, P3.10
+- **Gate:** in-game
+- **Scope:** side-by-side screenshots of the same build in Minecraft and in
+  KSP for vanilla, Mekanism and Create; record every mismatch as a fix or a
+  documented limitation (lighting and AO are known differences).
+- **Acceptance:** comparison sheet in `docs/`; no unexplained mismatches.
 
 ---
 

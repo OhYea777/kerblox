@@ -72,6 +72,14 @@ All of this is computed in Core and only copied into Unity objects by the plugin
 
 Verified API facts and open questions are in [KSP-API-NOTES.md](KSP-API-NOTES.md).
 
+## Planned: rendering modded blocks
+
+Blocks will look the same in KSP as on the Minecraft server. The NeoForge
+client exports Minecraft's own baked geometry, block entity renderer output,
+tints and textures into a local render pack, and KSP's mesher replays it. See
+[RENDERING.md](RENDERING.md). Before that, the grid moves to per-grid
+block-state palettes (P1.8), and the mesher becomes model-driven (P1.7).
+
 ## Planned: the Minecraft bridge
 
 See [BRIDGE.md](BRIDGE.md). The grid data model already provides what the
