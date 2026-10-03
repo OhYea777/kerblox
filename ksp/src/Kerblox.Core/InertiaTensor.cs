@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Kerblox.Core
 {
@@ -61,17 +62,21 @@ namespace Kerblox.Core
             new InertiaTensor(0, Float3.Zero, 0, 0, 0, 0, 0, 0, Float3.Zero, Quat.Identity);
 
         /// <summary>
-        /// Per-cell mass in tonnes from the registry's block densities. This is the only
-        /// place inertia depends on how cells map to block types.
+        /// Per-cell mass in tonnes from the registry's block densities, resolved once per
+        /// palette entry. Unknown and non-solid states weigh nothing, matching
+        /// <see cref="MassProperties"/>. This is the only place inertia depends on how
+        /// cells map to block types.
         /// </summary>
         public static Func<int, int, int, double> RegistryCellMass(VoxelGrid grid, BlockRegistry registry, BlockLayout layout)
         {
             double volume = (double)layout.BlockSize * layout.BlockSize * layout.BlockSize;
-            return (x, y, z) =>
+            var massByState = new Dictionary<BlockState, double>();
+            foreach (BlockState state in grid.Palette)
             {
-                BlockType t = registry.Get(grid.Get(x, y, z));
-                return t != null && t.Solid ? t.Density * volume : 0;
-            };
+                BlockType t = registry.Get(state);
+                massByState[state] = t != null && t.Solid ? t.Density * volume : 0;
+            }
+            return (x, y, z) => massByState.TryGetValue(grid.Get(x, y, z), out double m) ? m : 0;
         }
 
         public static InertiaTensor Compute(VoxelGrid grid, BlockRegistry registry, BlockLayout layout) =>

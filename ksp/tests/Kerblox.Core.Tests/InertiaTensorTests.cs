@@ -5,8 +5,8 @@ namespace Kerblox.Core.Tests;
 public class InertiaTensorTests
 {
     private static readonly BlockRegistry Registry = BlockRegistry.CreateDefault();
-    private static readonly BlockState Stone = new(BlockRegistry.Ids.Stone);
-    private static readonly BlockState Iron = new(BlockRegistry.Ids.IronBlock);
+    private static readonly BlockState Stone = BlockState.Parse("minecraft:stone");
+    private static readonly BlockState Iron = BlockState.Parse("minecraft:iron_block");
 
     private static InertiaTensor Compute(VoxelGrid g, float size) =>
         InertiaTensor.Compute(g, Registry, new BlockLayout(g, size));
@@ -158,6 +158,20 @@ public class InertiaTensorTests
         g.Fill(0, 1, 0, 0, 2, 1, Iron);
         g.Set(3, 2, 4, Iron);
         AssertDecompositionMatches(Compute(g, 0.625f));
+    }
+
+    [Fact]
+    public void BlockStatePropertiesAndUnknownBlocksResolveThroughThePalette()
+    {
+        // Properties don't change density; unknown blocks weigh nothing, like air.
+        var g = new VoxelGrid(3, 1, 1);
+        g.Set(0, 0, 0, BlockState.Parse("minecraft:stone"));
+        g.Set(1, 0, 0, BlockState.Parse("minecraft:iron_block[foo=bar]"));
+        g.Set(2, 0, 0, BlockState.Parse("somemod:mystery_block"));
+        var mass = InertiaTensor.RegistryCellMass(g, Registry, new BlockLayout(g, 1f));
+        Near(0.30, mass(0, 0, 0));
+        Near(0.60, mass(1, 0, 0));
+        Assert.Equal(0, mass(2, 0, 0));
     }
 
     [Fact]
