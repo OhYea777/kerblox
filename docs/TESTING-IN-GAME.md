@@ -73,7 +73,7 @@ In the VAB, with the grid part placed as the root:
 | Right-click the part (PAW) | A **Build blocks** button. Clicking it opens a **Kerblox blocks** window listing stone, oak planks, iron block, glass and white wool, and the button now reads **Stop building**. The editor switches to place mode. |
 | Hover the part | A translucent green cube shows where a block would go, on the face under the mouse. Holding Shift turns it red over the block that would be removed; Ctrl turns it blue. |
 | Left click on a face | A block of the selected type appears there. PAW Blocks and Block mass go up; the Engineer's Report mass follows. |
-| Left click on the outer face of the top, bottom or a side | The grid grows to take the block (log: `[Kerblox] Grid on ... resized`). The rest of the grid shifts by half a block in part space; that's expected until P2.2. |
+| Left click on the outer face of the top, bottom or a side | The grid grows to take the block (log: `[Kerblox] Grid on ... resized`). Existing blocks stay put (P2.2 compensates for the recentring). |
 | Shift+left click a block | It disappears. Removing the last block is refused with a message in the window. |
 | Ctrl+left click a block | That block becomes the selected type (shown as "Picked: ..." if it isn't in the list). |
 | Pick a block in the window, then place | The new type is placed. Clicks on the window itself never place blocks. |
