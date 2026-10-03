@@ -1,7 +1,7 @@
 # Minecraft bridge (draft)
 
-**Status: draft.** This is input to roadmap item P3.1, not a decision. Decisions
-marked **open** need the user.
+**Status: draft**, input to roadmap item P3.1. The "Decided" section is
+settled; everything under "Open decisions" needs the user.
 
 ## Goal
 
