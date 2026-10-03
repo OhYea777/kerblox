@@ -70,11 +70,17 @@ The part replaces Unity's collider-derived, uniform-density inertia tensor with
 one computed from block masses. KSP re-validates the tensor every physics frame,
 so these checks confirm ours survives.
 
-On entering flight, `scripts/ksp-logs.sh` should show, once per grid part:
+On entering flight, `scripts/ksp-logs.sh` should show two lines per grid part:
 
 ```
-[Kerblox] kerbloxBlockGrid inertia: principal (15.584, 8.194, 15.584) t·m², rotation (0, 0, 0, 1) (grid mass 6.855 t, rb mass 6.866 t)
+[Kerblox] kerbloxBlockGrid inertia: principal (15.584, 8.194, 15.584) t·m², rotation (0, 0, 0, 1) (grid mass 6.855 t, rb mass 1.000 t)
+[Kerblox] kerbloxBlockGrid inertia rescaled for rb mass 6.866 t
 ```
+
+The first line's `rb mass 1.000 t` is Unity's default: KSP hasn't set the
+rigidbody's mass yet when the part starts. The module re-applies the tensor
+whenever rb mass changes and logs the first such re-apply, so the second line
+shows the settled mass.
 
 The logged moments are for the blocks alone; the module scales them by rb mass /
 grid mass (here ×1.0015, for the 0.01 t frame) before applying them. A
@@ -83,7 +89,7 @@ for pitch and yaw, because it ignores the heavy iron base.
 
 | Check | Expected |
 | --- | --- |
-| Log line above | Present; principal moments ≈ (15.6, 8.2, 15.6), rotation identity. No `Part.inertiaTensor field not found` warning. |
+| Log lines above | Both present; principal moments ≈ (15.6, 8.2, 15.6), rotation identity. No `Part.inertiaTensor field not found` warning. |
 | Capsule + small probe core with a reaction wheel, SAS off, in orbit or on a stable suborbital arc | Rolling (about the long axis) speeds up roughly twice as fast as pitching or yawing for the same input, since 15.6 / 8.2 ≈ 1.9. Pitch and yaw feel identical. |
 | Spin it up in roll, release the controls | It keeps spinning cleanly about the long axis, no wobble. |
 | Time warp on and off, quicksave/quickload | Same log values after reload; behaviour unchanged after leaving warp. |

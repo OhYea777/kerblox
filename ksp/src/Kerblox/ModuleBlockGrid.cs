@@ -58,6 +58,7 @@ namespace Kerblox
         private bool applyInertia;       // set once KSP has taken its own inertia snapshot
         private Rigidbody inertiaRb;     // rb and mass the tensor was last applied for
         private float inertiaRbMass = -1f;
+        private bool loggedInertiaRescale; // KSP sets rb.mass after OnStartFinished; log the settled value once
 
         // Part's private copy of rb.inertiaTensor / max(1, rb.mass), restored every
         // FixedUpdate by Part.ValidateInertiaTensor (verified in the decompile).
@@ -425,6 +426,7 @@ namespace Kerblox
                 inertia.PrincipalRotation.Z, inertia.PrincipalRotation.W);
             float rbMass = rb.mass;
             if (rb == inertiaRb && rbMass == inertiaRbMass && rb.inertiaTensorRotation == rotation) return;
+            bool rescaled = rb == inertiaRb && rbMass != inertiaRbMass;
 
             // rb.mass also holds the part's frame mass, resources and physicsless children;
             // scale the grid's distribution to it, as KSP does for every other part.
@@ -445,6 +447,12 @@ namespace Kerblox
 
             inertiaRb = rb;
             inertiaRbMass = rbMass;
+
+            if (rescaled && !loggedInertiaRescale)
+            {
+                loggedInertiaRescale = true;
+                Log.Info($"{part.partInfo?.name} inertia rescaled for rb mass {rbMass:F3} t");
+            }
         }
 
         /// <summary>
