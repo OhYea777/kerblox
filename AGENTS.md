@@ -39,9 +39,9 @@ them with the user instead.
 - **The grid wire format is `GridCodec`** (versioned, magic `KBGR`). Bump the
   version and keep a decoder for the old one when changing it; craft files in
   the wild depend on it.
-- **Block ids are stable.** Never renumber `BlockRegistry.Ids`; 0 is air.
-  Block names match Minecraft's namespaced ids so the bridge maps 1:1.
-  (P1.8 replaces fixed ids with per-grid palettes of block-state strings.)
+- **Blocks are identified by canonical Minecraft block-state strings**
+  (`ns:block[props]`, props sorted), held in a per-grid palette; index 0 is
+  `minecraft:air`. `BlockRegistry.Ids` is frozen for v1 migration only: never renumber it.
 - **Minecraft renders, KSP replays.** Never parse Minecraft models in C#.
   Modded-block appearance comes from client-exported render packs
   ([docs/RENDERING.md](docs/RENDERING.md)). Render packs contain Mojang and mod

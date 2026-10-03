@@ -5,9 +5,9 @@ namespace Kerblox.Core.Tests;
 public class GeometryTests
 {
     private static readonly BlockRegistry Registry = BlockRegistry.CreateDefault();
-    private static readonly BlockState Stone = new(BlockRegistry.Ids.Stone);
-    private static readonly BlockState Glass = new(BlockRegistry.Ids.Glass);
-    private static readonly BlockState Iron = new(BlockRegistry.Ids.IronBlock);
+    private static readonly BlockState Stone = BlockState.Parse("minecraft:stone");
+    private static readonly BlockState Glass = BlockState.Parse("minecraft:glass");
+    private static readonly BlockState Iron = BlockState.Parse("minecraft:iron_block");
 
     private static MeshData Mesh(VoxelGrid g, float size = 1f) =>
         GridMesher.Build(g, Registry, new BlockLayout(g, size));

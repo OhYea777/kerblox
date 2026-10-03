@@ -102,7 +102,7 @@ namespace Kerblox.Core
             BlockType n = registry.Get(neighbour);
             if (n == null) return true;
             if (n.Opaque) return false;
-            return n.Id != self.TypeId;
+            return n != registry.Get(self);
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Kerblox.Core
 {
@@ -19,12 +20,23 @@ namespace Kerblox.Core
     /// Axes follow Unity/KSP part space: +Y is the stack axis ("up" on a rocket).
     /// Storage is Y-major (index = (y * SizeZ + z) * SizeX + x) so a horizontal
     /// slice is contiguous, which is also how the codec and future bridge lay it out.
+    ///
+    /// Cells hold indices into a per-grid palette of <see cref="BlockState"/>s, like
+    /// a Minecraft chunk section. Index 0 is always air. Entries are appended as new
+    /// states are written and are only dropped by <see cref="Compact"/>, so indices
+    /// are an internal detail: they aren't stable across compaction or encoding.
     /// </summary>
     public sealed class VoxelGrid
     {
         public const int MaxDimension = 256;
 
-        private readonly uint[] cells;
+        /// <summary>Cells are 16-bit, so this many distinct states can be live at once.</summary>
+        public const int MaxPaletteSize = ushort.MaxValue + 1;
+
+        private readonly ushort[] cells;
+        private readonly List<BlockState> palette = new List<BlockState> { BlockState.Air };
+        private readonly List<int> counts = new List<int>();                 // cells using each palette entry
+        private readonly Dictionary<BlockState, ushort> lookup = new Dictionary<BlockState, ushort>();
 
         public int SizeX { get; }
         public int SizeY { get; }
@@ -43,7 +55,9 @@ namespace Kerblox.Core
             CheckDimension(sizeY, nameof(sizeY));
             CheckDimension(sizeZ, nameof(sizeZ));
             SizeX = sizeX; SizeY = sizeY; SizeZ = sizeZ;
-            cells = new uint[sizeX * sizeY * sizeZ];
+            cells = new ushort[sizeX * sizeY * sizeZ];
+            counts.Add(cells.Length);
+            lookup.Add(BlockState.Air, 0);
         }
 
         private static void CheckDimension(int value, string name)
@@ -57,9 +71,15 @@ namespace Kerblox.Core
 
         public int IndexOf(int x, int y, int z) => (y * SizeZ + z) * SizeX + x;
 
+        /// <summary>
+        /// Palette entries, index 0 = air. May contain entries no cell uses any more
+        /// until <see cref="Compact"/> runs.
+        /// </summary>
+        public IReadOnlyList<BlockState> Palette => palette;
+
         /// <summary>Out-of-bounds reads return air, which keeps face culling at the edges trivial.</summary>
         public BlockState Get(int x, int y, int z) =>
-            InBounds(x, y, z) ? new BlockState(cells[IndexOf(x, y, z)]) : BlockState.Air;
+            InBounds(x, y, z) ? palette[cells[IndexOf(x, y, z)]] : BlockState.Air;
 
         /// <returns>True if the cell changed.</returns>
         public bool Set(int x, int y, int z, BlockState state)
@@ -67,9 +87,12 @@ namespace Kerblox.Core
             if (!InBounds(x, y, z))
                 throw new ArgumentOutOfRangeException($"({x},{y},{z}) outside {SizeX}x{SizeY}x{SizeZ}");
             int i = IndexOf(x, y, z);
-            var old = new BlockState(cells[i]);
+            BlockState old = palette[cells[i]];
             if (old == state) return false;
-            cells[i] = state.Raw;
+            ushort idx = IndexFor(state);
+            counts[cells[i]]--;
+            counts[idx]++;
+            cells[i] = idx;
             Revision++;
             Changed?.Invoke(new GridChange(x, y, z, old, state, Revision));
             return true;
@@ -78,39 +101,120 @@ namespace Kerblox.Core
         /// <summary>Fills an inclusive box. One revision bump, no per-cell events.</summary>
         public void Fill(int x0, int y0, int z0, int x1, int y1, int z1, BlockState state)
         {
+            ushort idx = IndexFor(state);
             for (int y = Math.Max(0, y0); y <= Math.Min(SizeY - 1, y1); y++)
                 for (int z = Math.Max(0, z0); z <= Math.Min(SizeZ - 1, z1); z++)
                     for (int x = Math.Max(0, x0); x <= Math.Min(SizeX - 1, x1); x++)
-                        cells[IndexOf(x, y, z)] = state.Raw;
+                    {
+                        int i = IndexOf(x, y, z);
+                        counts[cells[i]]--;
+                        counts[idx]++;
+                        cells[i] = idx;
+                    }
             Revision++;
         }
 
-        public int CountNonAir()
+        public int CountNonAir() => cells.Length - counts[0];
+
+        /// <summary>
+        /// Drops palette entries no cell uses and renumbers the rest in order of first
+        /// appearance in storage order (air stays 0). Content and <see cref="Revision"/>
+        /// are unchanged: this is bookkeeping, not an edit.
+        /// </summary>
+        public void Compact()
         {
-            int n = 0;
-            foreach (uint c in cells)
-                if ((c & 0xFFFF) != 0) n++;
-            return n;
+            ushort[] remap = BuildCompactRemap(out List<BlockState> newPalette);
+            for (int i = 0; i < cells.Length; i++)
+                cells[i] = remap[cells[i]];
+
+            var newCounts = new int[newPalette.Count];
+            for (int old = 0; old < palette.Count; old++)
+                newCounts[remap[old]] += counts[old]; // unused entries map to 0 with a count of 0
+            ReplacePalette(newPalette, newCounts);
+        }
+
+        /// <summary>
+        /// Maps current palette indices to a compacted, first-appearance ordering
+        /// without mutating anything. Unused entries map to 0. The codec writes this
+        /// ordering, so equal grids always encode to identical bytes.
+        /// </summary>
+        internal ushort[] BuildCompactRemap(out List<BlockState> newPalette)
+        {
+            var remap = new ushort[palette.Count];
+            var seen = new bool[palette.Count];
+            newPalette = new List<BlockState> { BlockState.Air };
+            seen[0] = true;
+            int live = 1;
+            for (int i = 1; i < counts.Count; i++) if (counts[i] > 0) live++;
+
+            for (int i = 0; i < cells.Length && newPalette.Count < live; i++)
+            {
+                ushort c = cells[i];
+                if (seen[c]) continue;
+                seen[c] = true;
+                remap[c] = (ushort)newPalette.Count;
+                newPalette.Add(palette[c]);
+            }
+            return remap;
+        }
+
+        private ushort IndexFor(BlockState state)
+        {
+            if (lookup.TryGetValue(state, out ushort idx)) return idx;
+            if (palette.Count == MaxPaletteSize)
+            {
+                Compact();
+                if (palette.Count == MaxPaletteSize)
+                    throw new InvalidOperationException($"Grid palette is full ({MaxPaletteSize} distinct block states)");
+            }
+            idx = (ushort)palette.Count;
+            palette.Add(state);
+            counts.Add(0);
+            lookup.Add(state, idx);
+            return idx;
         }
 
         public VoxelGrid Clone()
         {
             var copy = new VoxelGrid(SizeX, SizeY, SizeZ);
             Array.Copy(cells, copy.cells, cells.Length);
+            copy.ReplacePalette(palette, counts);
             copy.Revision = Revision;
             return copy;
         }
 
-        /// <summary>Raw cell access for the codec. Same layout as <see cref="IndexOf"/>.</summary>
-        internal uint[] RawCells => cells;
+        private void ReplacePalette(IList<BlockState> states, IList<int> stateCounts)
+        {
+            palette.Clear(); palette.AddRange(states);
+            counts.Clear(); counts.AddRange(stateCounts);
+            lookup.Clear();
+            for (int i = 0; i < palette.Count; i++) lookup.Add(palette[i], (ushort)i);
+        }
 
-        internal void MarkBulkLoaded() => Revision++;
+        /// <summary>Raw cell access for the codec. Same layout as <see cref="IndexOf"/>.</summary>
+        internal ushort[] RawCells => cells;
+
+        /// <summary>
+        /// Codec bulk load: installs a palette (index 0 must be air, no duplicates) for
+        /// cells the caller has already written into <see cref="RawCells"/>.
+        /// </summary>
+        internal void LoadPalette(IList<BlockState> states)
+        {
+            var stateCounts = new int[states.Count];
+            foreach (ushort c in cells) stateCounts[c]++;
+            ReplacePalette(states, stateCounts);
+            Revision++;
+        }
 
         public bool ContentEquals(VoxelGrid other)
         {
             if (other == null || other.SizeX != SizeX || other.SizeY != SizeY || other.SizeZ != SizeZ) return false;
+            // Palettes may order the same states differently, so compare through a mapping.
+            var map = new int[palette.Count];
+            for (int i = 0; i < map.Length; i++)
+                map[i] = other.lookup.TryGetValue(palette[i], out ushort o) ? o : -1;
             for (int i = 0; i < cells.Length; i++)
-                if (cells[i] != other.cells[i]) return false;
+                if (map[cells[i]] != other.cells[i]) return false;
             return true;
         }
     }
