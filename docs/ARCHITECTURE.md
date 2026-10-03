@@ -47,10 +47,17 @@ origin, so cell `(0,0,0)`'s min corner is at `-size * blockSize / 2`.
 
 All of this is computed in Core and only copied into Unity objects by the plugin:
 
-- **Mesh** (`GridMesher`): one quad per visible face. A face is hidden when the
-  neighbour is opaque, or when it's the same see-through block (glass next to
-  glass). Triangles wind so that `Cross(b-a, c-a)` points outward, which is
-  Unity's front face. UVs index a horizontal atlas, one 16 px tile per block type.
+- **Mesh** (`GridMesher`): replays a `BlockModel` per palette entry (resolved
+  once per entry, not per cell). Models hold quads grouped by cull face plus
+  per-face occlusion flags; a quad with a cull face is dropped when the
+  neighbour occludes the touching face, or is the same see-through block (glass
+  next to glass), and quads without one always draw, as in Minecraft's chunk
+  renderer. Quads are split into one submesh per `MaterialKey` (render layer,
+  atlas, tint), ordered solid → cutout → translucent. Models come from a
+  `BlockModelResolver` chain: `BuiltinModelSource` (one cube per registry type
+  on the procedural atlas, 16 px per tile, plus a blank tile), then
+  `MapColorFallback` (an opaque tinted cube) for unknown states. Triangles wind
+  so that `Cross(b-a, c-a)` points outward, which is Unity's front face.
 - **Colliders** (`BoxMerger`): greedy X→Z→Y merge of solid cells, ignoring
   block type. Boxes never overlap and cover exactly the solid cells.
 - **Mass** (`MassProperties`): sum of density × block volume. CoM is the

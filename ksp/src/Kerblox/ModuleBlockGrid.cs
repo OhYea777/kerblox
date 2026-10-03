@@ -52,6 +52,13 @@ namespace Kerblox
         private static BlockRegistry registry;
         internal static BlockRegistry Registry => registry ?? (registry = BlockRegistry.CreateDefault());
 
+        private static BuiltinModelSource builtinModels;
+        private static BlockModelResolver models;
+        private static BuiltinModelSource BuiltinModels => builtinModels ?? (builtinModels = new BuiltinModelSource(Registry));
+
+        /// <summary>Built-in cubes, then map-colour cubes. Render packs will slot in front (P3.10).</summary>
+        internal static BlockModelResolver Models => models ?? (models = BuiltinModels.CreateResolver());
+
         private VoxelGrid grid;
         private MassProperties massProps;
         private InertiaTensor inertia;
@@ -335,7 +342,7 @@ namespace Kerblox
 
         private void BuildMesh(Transform root, BlockLayout layout)
         {
-            MeshData data = GridMesher.Build(grid, Registry, layout);
+            MeshData data = GridMesher.Build(grid, Models, layout);
 
             var mesh = new Mesh { name = "KerbloxGridMesh" };
             if (data.Vertices.Count > 65535) mesh.indexFormat = IndexFormat.UInt32;
@@ -353,7 +360,23 @@ namespace Kerblox
             mesh.vertices = verts;
             mesh.normals = normals;
             mesh.uv = uvs;
-            mesh.triangles = data.Triangles.ToArray();
+
+            // One submesh and material per layer/atlas/tint, already in draw order.
+            // An empty grid still gets one (empty) submesh so the renderer stays valid.
+            int count = Mathf.Max(1, data.SubMeshes.Count);
+            var materials = new Material[count];
+            mesh.subMeshCount = count;
+            if (data.SubMeshes.Count == 0)
+            {
+                mesh.SetTriangles(new int[0], 0);
+                materials[0] = BlockAtlas.GetMaterial(new MaterialKey(RenderLayer.Solid, BuiltinModelSource.AtlasIndex, Rgba32.White), BuiltinModels);
+            }
+            for (int s = 0; s < data.SubMeshes.Count; s++)
+            {
+                SubMeshData sub = data.SubMeshes[s];
+                mesh.SetTriangles(sub.Triangles.ToArray(), s);
+                materials[s] = BlockAtlas.GetMaterial(sub.Key, BuiltinModels);
+            }
             mesh.RecalculateBounds();
             mesh.RecalculateTangents();
 
@@ -363,7 +386,7 @@ namespace Kerblox
             MeshRenderer mr = root.GetComponent<MeshRenderer>();
             if (mr == null) mr = root.gameObject.AddComponent<MeshRenderer>();
             mf.sharedMesh = mesh;
-            mr.sharedMaterial = BlockAtlas.GetMaterial(Registry);
+            mr.sharedMaterials = materials;
 
             if (ownedMesh != null) Destroy(ownedMesh);
             ownedMesh = mesh;

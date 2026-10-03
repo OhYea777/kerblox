@@ -76,7 +76,10 @@ to `ilspycmd -p` output and are only a rough guide.
 | --- | --- |
 | Stock code uses `Shader.Find("KSP/Diffuse")`, so the shader exists at runtime | Verified |
 | `Part.ResetModelRenderersCache()` and `ResetModelMeshRenderersCache()` exist; highlight lists come from `FindModelRenderersCached()` | Verified |
+| `KSP/Alpha/Cutoff` (with `_Cutoff`) and `KSP/Alpha/Translucent` exist at runtime: `PartTools` caches them as `shaderCutout`/`shaderAlpha`, and `PartReader` builds alpha-cutout and alpha materials from them | Verified (`PartTools`, `PartReader.ReadMaterial`) |
+| Whether `KSP/Diffuse`, `KSP/Alpha/Cutoff` and `KSP/Alpha/Translucent` have a `_Color` that tints `_MainTex` | Unverified: stock code sets `_Color` only on other shaders, and the compiled shader assets don't expose property names. `BlockAtlas` checks `HasProperty("_Color")` and logs a warning; in-game |
 | Generated mesh highlights correctly on mouseover | In-game |
+| Highlighting and part fading work with several materials on one generated renderer | In-game |
 
 ## Attach nodes
 
