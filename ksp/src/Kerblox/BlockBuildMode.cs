@@ -15,6 +15,12 @@ namespace Kerblox
     /// destroys it, and <see cref="OnDestroy"/> is where every input lock, the ghost
     /// GameObject and its material are released.
     ///
+    /// Because it's on the part, KSP's procedural drag cube render clones it along
+    /// with the part (<c>Object.Instantiate</c>, components disabled, then destroyed).
+    /// The clone gets none of the private fields, so it does nothing: the lock and
+    /// events are set up in <see cref="Begin"/>, which only <see cref="Open"/> calls,
+    /// and <see cref="OnDestroy"/> skips any instance that never began.
+    ///
     /// Keeping clicks out of KSP's editor (verified against KSP 1.12.5 Assembly-CSharp,
     /// see docs/KSP-API-NOTES.md): part pickup in place mode is gated on
     /// <c>ControlTypes.EDITOR_PAD_PICK_PLACE</c>, but the offset/rotate/root modes pick
@@ -51,7 +57,8 @@ namespace Kerblox
         private bool edited;
         private string status = "";
         // Per instance, so a closing tool removing its lock at end of frame can't
-        // release the lock of the one that replaced it.
+        // release the lock of the one that replaced it. Null until Begin, which is
+        // how OnDestroy tells the real tool from a drag cube render's clone.
         private string lockId;
         private Rect windowRect = new Rect(260f, 120f, 240f, 10f);
 
@@ -76,7 +83,7 @@ namespace Kerblox
 
             EditorLogic.fetch.toolsUI.SetMode(ConstructionMode.Place);
             var tool = m.gameObject.AddComponent<BlockBuildMode>();
-            tool.module = m;
+            tool.Begin(m);
             Active = tool;
             m.OnBuildModeChanged(true);
             Log.Info($"Build mode on for {m.part.partInfo?.name}");
@@ -92,8 +99,9 @@ namespace Kerblox
             Destroy(this);
         }
 
-        private void Awake()
+        private void Begin(ModuleBlockGrid m)
         {
+            module = m;
             openedFrame = Time.frameCount;
             lockId = LockPrefix + GetInstanceID();
             InputLockManager.SetControlLock(Locks, lockId);
@@ -109,6 +117,10 @@ namespace Kerblox
 
         private void OnDestroy()
         {
+            // A clone made by the drag cube render (or a tool AddComponent'd elsewhere)
+            // never began and owns nothing. Not keyed on module: deleting the part
+            // destroys the module too, and the lock must still be released then.
+            if (lockId == null) return;
             GameEvents.onGameSceneLoadRequested.Remove(OnSceneLoadRequested);
             InputLockManager.RemoveControlLock(lockId);
             if (ghost != null) Destroy(ghost);
@@ -124,7 +136,7 @@ namespace Kerblox
 
         private void Update()
         {
-            if (closing) return;
+            if (closing || lockId == null) return;
             if (module == null || EditorLogic.fetch == null || !HighLogic.LoadedSceneIsEditor)
             {
                 closing = true;

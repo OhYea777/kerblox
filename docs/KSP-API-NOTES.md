@@ -50,6 +50,7 @@ to `ilspycmd -p` output and are only a rough guide.
 | `DragCube` fields are private; public members are `Area`, `Center`, `Size`, `Name`, `Weight` | Verified (compile error with lowercase) |
 | Stock `DRAG_CUBE { procedural = True }` re-renders every `ProceduralDragUpdateInterval` in flight | Verified (`DragCubeList` ~line 373) |
 | Re-rendering is safe only when `FlightGlobals.ready` (flight) or when the part is attached to `EditorLogic.RootPart` and not on layer TransparentFX (editor) | Taken from ROUtils `DragCubeTool`; in-game |
+| `RenderProceduralDragCube` clones the live part: `Object.Instantiate(p, Vector3.zero, Quaternion.identity)`, then `SetupPartForRender` sets `enabled = false` on every `MonoBehaviour` under it, then `Object.Destroy(clone)` before returning. So every component on the part GameObject gets `Awake` (during `Instantiate`) and `OnDestroy` (end of frame) on a copy whose non-serialized private fields are default; `Update`/`OnGUI` never run. Extra components on the part must stay inert when not initialised (see `BlockBuildMode`) | Verified (`DragCubeSystem.RenderProceduralDragCube` ~line 2593, `SetupPartForRender` ~line 1987); log symptom seen in game |
 
 ## Editor events
 
