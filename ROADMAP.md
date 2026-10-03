@@ -129,7 +129,7 @@ Goal: place and remove blocks on the grid part inside the VAB/SPH.
   builds; KSP API members used are recorded in KSP-API-NOTES.
 
 ### P2.2: Attach node and attached-part maintenance on edit
-- **Status:** todo
+- **Status:** done
 - **Depends on:** P2.1
 - **Gate:** in-game
 - **Scope:** when the grid changes, move stack nodes and any parts attached to

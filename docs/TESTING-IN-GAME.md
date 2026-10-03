@@ -73,7 +73,7 @@ In the VAB, with the grid part placed as the root:
 | Right-click the part (PAW) | A **Build blocks** button. Clicking it opens a **Kerblox blocks** window listing stone, oak planks, iron block, glass and white wool, and the button now reads **Stop building**. The editor switches to place mode. |
 | Hover the part | A translucent green cube shows where a block would go, on the face under the mouse. Holding Shift turns it red over the block that would be removed; Ctrl turns it blue. |
 | Left click on a face | A block of the selected type appears there. PAW Blocks and Block mass go up; the Engineer's Report mass follows. |
-| Left click on the outer face of the top, bottom or a side | The grid grows to take the block (log: `[Kerblox] Grid on ... resized`). The rest of the grid shifts by half a block in part space; that's expected until P2.2. |
+| Left click on the outer face of the top, bottom or a side | The grid grows to take the block (log: `[Kerblox] Grid on ... resized`). Existing blocks stay put (P2.2 compensates for the recentring). |
 | Shift+left click a block | It disappears. Removing the last block is refused with a message in the window. |
 | Ctrl+left click a block | That block becomes the selected type (shown as "Picked: ..." if it isn't in the list). |
 | Pick a block in the window, then place | The new type is placed. Clicks on the window itself never place blocks. |
@@ -107,6 +107,36 @@ Log lines: `[Kerblox] Build mode on for kerbloxBlockGrid` and `[Kerblox] Build m
 | `[Kerblox] Shader 'KSP/Diffuse' not found` | Shader lookup failed. The part renders with Unity's fallback. |
 | `NullReferenceException` with `ModuleBlockGrid` in the stack | A bug. Send the stack from `Player.log`. |
 | `[Kerblox] Drag cube for kerbloxBlockGrid: size ..., areas [...]` | Normal: a drag cube was rendered, once in the VAB when attached to the root and once on entering flight. |
+
+## P2.2: attached parts follow grid edits
+
+Needs a way to edit a grid in the VAB, i.e. P2.3's build mode. Before each
+edit, note where the existing blocks are against the VAB background grid. After
+each edit run `scripts/ksp-logs.sh`: every compensation logs a
+`[Kerblox] Moved ...` line.
+
+Build: Kerblox grid as the **root**, a stock tank on its top node, a stock
+engine on its bottom node, and a radial part (e.g. a fin or a small RCS thruster)
+surface-attached to the side of the solid iron base (bottom layer), with symmetry off.
+
+| Check | Expected |
+| --- | --- |
+| Add a block above the top layer (grow +Y) | Existing blocks don't move. The tank rises one block (0.625 m) and stays on the node. Engine and fin don't move. |
+| Add a block below the bottom layer (grow -Y) | Existing blocks don't move. The engine drops one block. Tank and fin don't move. |
+| Add a block beside the grid (grow ±X, then ±Z) | Existing blocks don't move. Tank and engine shift half a block sideways with the nodes, which stay centred on the widened grid. The fin doesn't move. |
+| Remove the block directly under the fin | The fin slides inward one block onto the next solid block and stays attached: picking up the grid takes the fin with it. `[Kerblox] ... slid 1 block(s)` in the log. |
+| Attach a second fin to the hollow stone wall and remove the block under it | Nothing solid is directly behind it (the capsule is hollow), so the fin stays where it was and the log warns `lost its block ... left in place`. |
+| Remove the whole top layer | The tank drops onto the new top face. |
+
+Now make the Kerblox grid a **child**: a stock probe core as root, the grid on
+its bottom node via the grid's top node.
+
+| Check | Expected |
+| --- | --- |
+| Grow the grid downward | The grid stays attached under the probe core; its bottom (and the engine on it) moves down one block. |
+| Grow the grid upward | The grid stays attached; existing blocks and the engine move down one block (the top node stays at the probe core). |
+| Offset tool reset (Offset gizmo, then reset) on the tank after an edit | The tank snaps to its node, not to where it was before the edit. |
+| Save and reload the craft after edits | Parts load at their moved positions, still attached. |
 
 ## Reporting back
 
