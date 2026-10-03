@@ -117,7 +117,7 @@ with correct mass, CoM and drag.
 Goal: place and remove blocks on the grid part inside the VAB/SPH.
 
 ### P2.1: Grid editing API in ModuleBlockGrid
-- **Status:** todo
+- **Status:** done
 - **Depends on:** P1.8
 - **Gate:** none
 - **Scope:** `SetBlock`/`RemoveBlock` on the module that edits the grid,

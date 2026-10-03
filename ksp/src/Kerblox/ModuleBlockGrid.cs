@@ -154,6 +154,76 @@ namespace Kerblox
 
         #endregion
 
+        #region Editing
+
+        /// <summary>
+        /// Raised after an edit resized the grid and geometry was rebuilt, before
+        /// <c>GameEvents.onEditorShipModified</c> fires.
+        ///
+        /// Contract: <see cref="GridEdit.ShiftX"/>/Y/Z map old cells to new ones
+        /// (old (x,y,z) is now at (x+ShiftX, ...)), and
+        /// <c>edit.Displacement(blockSize)</c> is how far the pre-existing blocks moved
+        /// in this part's local space, in metres, because <see cref="BlockLayout"/>
+        /// re-centres the grid on the part origin. Nothing is moved to compensate: the
+        /// part transform, attach nodes' attached parts and children stay where they
+        /// were. Keeping blocks fixed in world space is the listener's job (P2.2).
+        /// </summary>
+        public event Action<ModuleBlockGrid, GridEdit> GridResized;
+
+        /// <summary>Grid size in cells. Valid coordinates for <see cref="GetBlock"/> are 0..size-1.</summary>
+        public int SizeX { get { EnsureGrid(); return grid.SizeX; } }
+        public int SizeY { get { EnsureGrid(); return grid.SizeY; } }
+        public int SizeZ { get { EnsureGrid(); return grid.SizeZ; } }
+
+        /// <summary>Out-of-bounds cells read as air.</summary>
+        public BlockState GetBlock(int x, int y, int z)
+        {
+            EnsureGrid();
+            return grid.Get(x, y, z);
+        }
+
+        /// <summary>
+        /// Sets one cell, growing the grid when (x,y,z) lies outside it (see
+        /// <see cref="GridEditor.SetBlock"/> and <see cref="GridResized"/>). Editor
+        /// only: flight runs against a frozen grid, so calls in any other scene are
+        /// refused with a warning. On a change it re-encodes <see cref="gridData"/>,
+        /// rebuilds mesh, colliders, mass and CoM, marks the drag cube for a
+        /// re-render and fires <c>GameEvents.onEditorShipModified</c>.
+        /// </summary>
+        public GridEdit SetBlock(int x, int y, int z, BlockState state)
+        {
+            EnsureGrid();
+            if (!HighLogic.LoadedSceneIsEditor)
+            {
+                Log.Warn($"Refused grid edit at ({x},{y},{z}) on {part.partInfo?.name} outside the editor");
+                return new GridEdit(GridEditStatus.NoChange, grid, grid.SizeX, grid.SizeY, grid.SizeZ);
+            }
+
+            GridEdit edit = GridEditor.SetBlock(grid, x, y, z, state);
+            if (edit.Status == GridEditStatus.TooLarge)
+                Log.Warn($"Grid edit at ({x},{y},{z}) would exceed {VoxelGrid.MaxDimension} blocks per axis");
+            if (!edit.Changed) return edit;
+
+            grid = edit.Grid;
+            gridData = GridCodec.ToText(grid);
+            Rebuild();          // also sets dragCubeDirty; FixedUpdate re-renders once the editor is ready
+            part.UpdateMass();  // GetModuleMass is only polled, so push the new mass now
+
+            if (edit.Resized)
+            {
+                Log.Info($"Grid on {part.partInfo?.name} resized: {edit}");
+                GridResized?.Invoke(this, edit);
+            }
+            if (EditorLogic.fetch != null)
+                GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
+            return edit;
+        }
+
+        /// <summary>Clears one cell to air. Never resizes the grid.</summary>
+        public GridEdit RemoveBlock(int x, int y, int z) => SetBlock(x, y, z, BlockState.Air);
+
+        #endregion
+
         #region Model
 
         private Transform GetModelTransform()
