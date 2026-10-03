@@ -1,0 +1,139 @@
+{
+  "$comment": "Numeric constants of the Kerblox bridge protocol. docs/BRIDGE.md is the normative spec; its tables must match this file, and the C# (P3.2) and Java (P3.4) implementations each test their constants against it.",
+  "protocol": {
+    "magic": "KBLX",
+    "major": 1,
+    "minor": 0,
+    "byteOrder": "little-endian",
+    "headerSize": 16,
+    "minMaxFrame": 1048576,
+    "maxStateLength": 1024,
+    "maxGridKeyLength": 64,
+    "gridCodecVersion": 2,
+    "pingIdleMs": 1000,
+    "peerTimeoutMs": 5000,
+    "reconnectInitialMs": 500,
+    "reconnectMaxMs": 5000,
+    "hashAuditMinIntervalMs": 5000,
+    "signalSnapshotMaxIntervalMs": 1000,
+    "recommendedMaxFrame": 16777216,
+    "maxGridPayload": 268435456,
+    "worstCaseGridPayload": 134347802,
+    "minGridDimension": 1,
+    "maxGridDimension": 256,
+    "gridKeyPattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+    "resyncTimeoutMs": 30000,
+    "fnv1a64OffsetBasis": "cbf29ce484222325",
+    "fnv1a64Prime": "100000001b3",
+    "seqWrapsTo": 1,
+    "auditAckTimeoutMs": 30000
+  },
+  "flags": {
+    "ACK_REQUESTED": 1
+  },
+  "roles": {
+    "KSP": 1,
+    "MINECRAFT": 2
+  },
+  "messageTypes": {
+    "HELLO": 1,
+    "BYE": 2,
+    "ERROR": 3,
+    "PING": 4,
+    "PONG": 5,
+    "GRID_OPEN": 256,
+    "GRID_READY": 257,
+    "GRID_CLOSE": 258,
+    "FULL_SYNC": 512,
+    "BLOCK_DELTA": 513,
+    "BLOCK_EDIT": 514,
+    "ACK": 515,
+    "RESYNC_REQUEST": 516,
+    "SIGNAL_OUTPUT": 768,
+    "SIGNAL_INPUT": 769,
+    "SIM_STATE": 770,
+    "GRID_RESIZE": 517
+  },
+  "errorCodes": {
+    "INCOMPATIBLE_VERSION": {
+      "value": 1,
+      "fatal": true
+    },
+    "PROTOCOL_VIOLATION": {
+      "value": 2,
+      "fatal": true
+    },
+    "UNKNOWN_GRID": {
+      "value": 3,
+      "fatal": false
+    },
+    "BAD_PAYLOAD": {
+      "value": 4,
+      "fatal": false
+    },
+    "EDIT_REJECTED": {
+      "value": 5,
+      "fatal": false
+    },
+    "GRID_LOST": {
+      "value": 6,
+      "fatal": false
+    },
+    "INTERNAL": {
+      "value": 7,
+      "fatal": false
+    },
+    "REGION_EXHAUSTED": {
+      "value": 8,
+      "fatal": false
+    },
+    "HASH_DISAGREEMENT": {
+      "value": 9,
+      "fatal": false
+    },
+    "UNEXPECTED_MESSAGE": {
+      "value": 10,
+      "fatal": false
+    }
+  },
+  "byeReasons": {
+    "SHUTDOWN": 0,
+    "REPLACED": 1,
+    "ERROR": 2
+  },
+  "gridModes": {
+    "EDITOR": 1,
+    "FLIGHT": 2
+  },
+  "gridReadyStatus": {
+    "OK": 0,
+    "REFUSED": 1
+  },
+  "gridCloseReasons": {
+    "EDITOR_EXIT": 0,
+    "PART_REMOVED": 1,
+    "VESSEL_GONE": 2
+  },
+  "resyncReasons": {
+    "REV_GAP": 0,
+    "DECODE_ERROR": 1,
+    "LOCAL_STATE_LOST": 2
+  },
+  "simStates": {
+    "RUNNING": 1,
+    "PAUSED": 2
+  },
+  "faces": {
+    "DOWN": 0,
+    "UP": 1,
+    "NORTH": 2,
+    "SOUTH": 3,
+    "WEST": 4,
+    "EAST": 5,
+    "ANY": 6
+  },
+  "gridModeNames": {
+    "1": "editor",
+    "2": "flight"
+  }
+}
