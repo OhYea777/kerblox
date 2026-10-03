@@ -40,6 +40,13 @@ to `ilspycmd -p` output and are only a rough guide.
 | `Part.CoMOffset` is a public field; `rb.centerOfMass = Vector3.zero + CoMOffset` is set when the rigidbody is created | Verified (`Part` ~line 8024) |
 | Whether KSP re-applies `CoMOffset` to an existing rigidbody later | Unverified, so the module sets `rb.centerOfMass` itself |
 | Unity's inertia tensor from colliders assumes uniform density | Unity behaviour, see P1.5 |
+| `Part.Start` (flight) creates the rigidbody, yields one frame, then snapshots `rb.inertiaTensor / Mathf.Max(1f, rb.mass)` into the private field `Part.inertiaTensor` (Vector3), before `ModulesBeforePartAttachJoint` and long before `ModulesOnStartFinished` | Verified (`Part.Start`; `PromoteToPhysicalPart` snapshots the same way) |
+| `Part.FixedUpdate` in flight (once `started`) calls `ValidateInertiaTensor()` every frame: if `rb.inertiaTensor != inertiaTensor * Mathf.Max(1f, rb.mass)` and every component of the field is > 1e-6, it writes that value back. So setting `rb.inertiaTensor` alone is undone next physics frame; the private field must be updated too (the module does this by reflection) | Verified (`Part.ValidateInertiaTensor`, `Part.FixedUpdate`) |
+| Nothing in stock code writes `inertiaTensorRotation` on a part's `rb` (only `ModuleRoboticServoRotor` on its moving-part rb); `VesselPrecalculate` reads both `rb.inertiaTensor` and `rb.inertiaTensorRotation` to build the vessel MOI | Verified (grep of the decompile) |
+| `FlightIntegrator.UpdateMassStats` sets `rb.mass = max(MinimumRBMass, part.mass + resourceMass + physicsless child mass)` (halved with a servo rb), so rb.mass can change in flight | Verified |
+| `PartModule.OnStartFinished(StartState)` is virtual and called from `Part.Start` via `ModulesOnStartFinished` | Verified |
+| No stock pack/unpack path calls `ResetInertiaTensor` on part rigidbodies (only `ModuleCargoPart`, `ModuleGroundPart` and VehiclePhysics do, on their own parts) | Verified (grep of the decompile) |
+| Once `inertiaTensor`/`inertiaTensorRotation` are set explicitly, Unity keeps them rather than recomputing from colliders | Unity behaviour, in-game (P1.5) |
 
 ## Drag cubes
 

@@ -1,8 +1,8 @@
 # Testing in game
 
-These steps verify roadmap item P1.3: the block grid part loads, builds, and
-flies with correct mass, CoM and drag. Agents can't run KSP, so a human does
-this and reports back.
+These steps verify roadmap items P1.3 (the block grid part loads, builds, and
+flies with correct mass, CoM and drag) and P1.5 (its inertia tensor). Agents
+can't run KSP, so a human does this and reports back.
 
 ## 1. Install
 
@@ -64,6 +64,54 @@ Add an engine and a probe core (or pod), then launch.
 | CoM in flight | Same behaviour as in the VAB. A side-mounted engine produces the torque you'd expect from a low CoM. |
 | Revert to launch, and quicksave/quickload (F5/F9) | The part rebuilds identically. |
 
+## 5. Inertia tensor (P1.5)
+
+The part replaces Unity's collider-derived, uniform-density inertia tensor with
+one computed from block masses. KSP re-validates the tensor every physics frame,
+so these checks confirm ours survives.
+
+On entering flight, `scripts/ksp-logs.sh` should show two lines per grid part:
+
+```
+[Kerblox] kerbloxBlockGrid inertia: principal (15.584, 8.194, 15.584) t·m², rotation (0, 0, 0, 1) (grid mass 6.855 t, rb mass 1.000 t)
+[Kerblox] kerbloxBlockGrid inertia rescaled for rb mass 6.866 t
+```
+
+The first line's `rb mass 1.000 t` is Unity's default: KSP hasn't set the
+rigidbody's mass yet when the part starts. The module re-applies the tensor
+whenever rb mass changes and logs the first such re-apply, so the second line
+shows the settled mass.
+
+The logged moments are for the blocks alone; the module scales them by rb mass /
+grid mass (here ×1.0015, for the 0.01 t frame) before applying them. A
+uniform-density tensor for the same shape and mass would give about 17.3 t·m²
+for pitch and yaw, because it ignores the heavy iron base.
+
+| Check | Expected |
+| --- | --- |
+| Log lines above | Both present; principal moments ≈ (15.6, 8.2, 15.6), rotation identity. No `Part.inertiaTensor field not found` warning. |
+| Capsule + small probe core with a reaction wheel, SAS off, in orbit or on a stable suborbital arc | Rolling (about the long axis) speeds up roughly twice as fast as pitching or yawing for the same input, since 15.6 / 8.2 ≈ 1.9. Pitch and yaw feel identical. |
+| Spin it up in roll, release the controls | It keeps spinning cleanly about the long axis, no wobble. |
+| Time warp on and off, quicksave/quickload | Same log values after reload; behaviour unchanged after leaving warp. |
+
+**Asymmetric grid.** Grids aren't editable in the VAB yet, so swap in a lopsided
+one by hand: save a craft with the capsule, quit to the main menu, open the
+`.craft` file and replace the `gridData = ...` value inside `MODULE { name = ModuleBlockGrid }`
+with:
+
+```
+S0JHUgIEAAgABAAGDW1pbmVjcmFmdDphaXIUbWluZWNyYWZ0Omlyb25fYmxvY2sPbWluZWNyYWZ0OnN0b25lD21pbmVjcmFmdDpnbGFzcxRtaW5lY3JhZnQ6b2FrX3BsYW5rcxRtaW5lY3JhZnQ6d2hpdGVfd29vbBEBAwIBAQIAAQIBAQIAAQIBAQMCAQEDAgEBAgABAgEBAgABAgEBAwIBAQMDAQECAAEDAQECAAEDAQEDAwEBAwIBAQIAAQIBAQIAAQIBAQMCAQEDAgEBAgABAgEBAgABAgEBAwIQBAUAAgUCAAIFBQA
+```
+
+This is the capsule with its whole −X wall (rows 1 to 5) turned to iron. Load it.
+
+| Check | Expected |
+| --- | --- |
+| VAB | Iron-coloured wall on one side; PAW shows Block mass **8.418 t**. CoM marker pulled toward the iron wall and down. |
+| Log line in flight | Principal moments ≈ (17.997, 10.126, 18.302) t·m², rotation ≈ (0, 0, 0.040, 0.999): principal axes tilted about 4.6° about Z. |
+| Spin it in roll with SAS off, release | A slight wobble (coning of a few degrees), since the long axis is no longer a principal axis. The uniform-density tensor would spin it cleanly. |
+| Pitch vs yaw | Nearly identical (18.0 vs 18.3), both much slower than roll. |
+
 ## P2.3: Block placement tool
 
 In the VAB, with the grid part placed as the root:
@@ -87,7 +135,7 @@ In the VAB, with the grid part placed as the root:
 
 Log lines: `[Kerblox] Build mode on for kerbloxBlockGrid` and `[Kerblox] Build mode off`.
 
-## 5. Logs
+## 6. Logs
 
 | Log | Where | What it contains |
 | --- | --- | --- |
@@ -106,6 +154,7 @@ Log lines: `[Kerblox] Build mode on for kerbloxBlockGrid` and `[Kerblox] Build m
 | `[Kerblox] Corrupt gridData ...` | A craft file holds an unreadable grid. The part falls back to the default capsule. |
 | `[Kerblox] Shader 'KSP/Diffuse' not found` | Shader lookup failed. The part renders with Unity's fallback. |
 | `NullReferenceException` with `ModuleBlockGrid` in the stack | A bug. Send the stack from `Player.log`. |
+| `[Kerblox] Part.inertiaTensor field not found ...` | KSP renamed the field this mod updates; the grid falls back to Unity's uniform-density tensor. Report it. |
 | `[Kerblox] Drag cube for kerbloxBlockGrid: size ..., areas [...]` | Normal: a drag cube was rendered, once in the VAB when attached to the root and once on entering flight. |
 
 ## P2.2: attached parts follow grid edits
@@ -141,4 +190,4 @@ its bottom node via the grid's top node.
 ## Reporting back
 
 Paste the output of `scripts/ksp-logs.sh` and note each failing row in the
-tables above. That's enough to move P1.3 to `done` or to file the fixes.
+tables above. That's enough to move P1.3 and P1.5 to `done` or to file the fixes.

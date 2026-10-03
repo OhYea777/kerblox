@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Kerblox.Core;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -20,6 +21,11 @@ namespace Kerblox
     ///    hence the grid is always re-decoded from gridData.
     ///  - Part.CoMOffset is copied into rb.centerOfMass when KSP creates the
     ///    rigidbody; if the rb already exists we set it directly too.
+    ///  - Inertia: Part.Start snapshots rb.inertiaTensor / max(1, rb.mass) into a
+    ///    private Part field a frame after creating the rigidbody, and Part.FixedUpdate
+    ///    (ValidateInertiaTensor) writes it back every physics frame. So the grid's
+    ///    tensor is applied from OnStartFinished (after the snapshot) and written to
+    ///    both the rigidbody and that field, and re-applied when rb.mass changes.
     /// </summary>
     public class ModuleBlockGrid : PartModule, IPartMassModifier
     {
@@ -48,6 +54,17 @@ namespace Kerblox
 
         private VoxelGrid grid;
         private MassProperties massProps;
+        private InertiaTensor inertia;
+        private bool applyInertia;       // set once KSP has taken its own inertia snapshot
+        private Rigidbody inertiaRb;     // rb and mass the tensor was last applied for
+        private float inertiaRbMass = -1f;
+        private bool loggedInertiaRescale; // KSP sets rb.mass after OnStartFinished; log the settled value once
+
+        // Part's private copy of rb.inertiaTensor / max(1, rb.mass), restored every
+        // FixedUpdate by Part.ValidateInertiaTensor (verified in the decompile).
+        private static readonly FieldInfo PartInertiaField =
+            typeof(Part).GetField("inertiaTensor", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static bool warnedInertiaField;
         private Mesh ownedMesh;          // only meshes we created; the prefab's is shared with clones
         private bool dragCubeDirty;
 
@@ -73,6 +90,18 @@ namespace Kerblox
             Log.Info($"{part.partInfo?.name} started in {state}: {blockCount} blocks, {gridMass:F3} t, CoM {part.CoMOffset}, {colliderCount} colliders");
         }
 
+        public override void OnStartFinished(StartState state)
+        {
+            base.OnStartFinished(state);
+            // In the editor the rigidbody is kinematic and KSP never validates the tensor.
+            applyInertia = HighLogic.LoadedSceneIsFlight;
+            if (applyInertia)
+            {
+                ApplyInertiaTensor();
+                Log.Info($"{part.partInfo?.name} inertia: {inertia} (grid mass {inertia.Mass:F3} t, rb mass {(part.rb != null ? part.rb.mass : 0f):F3} t)");
+            }
+        }
+
         public override string GetInfo()
         {
             EnsureGrid();
@@ -82,6 +111,7 @@ namespace Kerblox
 
         public void FixedUpdate()
         {
+            if (applyInertia) ApplyInertiaTensor();
             if (dragCubeDirty && ReadyForDragCube())
             {
                 dragCubeDirty = false;
@@ -133,6 +163,8 @@ namespace Kerblox
             massProps = MassProperties.Compute(grid, Registry, layout);
             blockCount = massProps.SolidBlocks;
             gridMass = (float)massProps.Mass;
+            inertia = InertiaTensor.Compute(grid, Registry, layout);
+            inertiaRb = null;
 
             Transform model = GetModelTransform();
             StripPlaceholderModel(model);
@@ -379,6 +411,48 @@ namespace Kerblox
             part.CoMOffset = new Vector3(com.X, com.Y, com.Z);
             if (part.rb != null)
                 part.rb.centerOfMass = part.CoMOffset;
+        }
+
+        /// <summary>
+        /// Replace Unity's uniform-density, collider-derived tensor with the one computed
+        /// from block masses. Cheap when nothing changed, so it runs every FixedUpdate.
+        /// </summary>
+        private void ApplyInertiaTensor()
+        {
+            Rigidbody rb = part.rb;
+            if (rb == null || !(inertia.Mass > 0)) return;
+
+            Quaternion rotation = new Quaternion(inertia.PrincipalRotation.X, inertia.PrincipalRotation.Y,
+                inertia.PrincipalRotation.Z, inertia.PrincipalRotation.W);
+            float rbMass = rb.mass;
+            if (rb == inertiaRb && rbMass == inertiaRbMass && rb.inertiaTensorRotation == rotation) return;
+            bool rescaled = rb == inertiaRb && rbMass != inertiaRbMass;
+
+            // rb.mass also holds the part's frame mass, resources and physicsless children;
+            // scale the grid's distribution to it, as KSP does for every other part.
+            float scale = (float)(rbMass / inertia.Mass);
+            Float3 p = inertia.PrincipalMoments;
+            // ValidateInertiaTensor skips components at or below 1e-6.
+            var moments = new Vector3(Mathf.Max(p.X * scale, 1e-5f), Mathf.Max(p.Y * scale, 1e-5f), Mathf.Max(p.Z * scale, 1e-5f));
+
+            rb.inertiaTensor = moments;
+            rb.inertiaTensorRotation = rotation;
+            if (PartInertiaField != null)
+                PartInertiaField.SetValue(part, moments / Mathf.Max(1f, rbMass));
+            else if (!warnedInertiaField)
+            {
+                warnedInertiaField = true;
+                Log.Warn("Part.inertiaTensor field not found; KSP will reset the grid's inertia tensor each physics frame");
+            }
+
+            inertiaRb = rb;
+            inertiaRbMass = rbMass;
+
+            if (rescaled && !loggedInertiaRescale)
+            {
+                loggedInertiaRescale = true;
+                Log.Info($"{part.partInfo?.name} inertia rescaled for rb mass {rbMass:F3} t");
+            }
         }
 
         /// <summary>

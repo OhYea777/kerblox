@@ -39,7 +39,7 @@ with correct mass, CoM and drag.
 - **Acceptance:** tests for face counts, winding, exact box coverage, CoM.
 
 ### P1.3: KSP part and ModuleBlockGrid
-- **Status:** review
+- **Status:** done
 - **Depends on:** P1.2
 - **Gate:** in-game
 - **Scope:** `kerbloxBlockGrid` part cfg (borrowed stock model, stripped at
@@ -57,7 +57,7 @@ with correct mass, CoM and drag.
 - **Acceptance:** `scripts/deploy.sh` installs into a clean KSP; CI green.
 
 ### P1.5: Correct inertia tensor for mixed-density grids
-- **Status:** todo
+- **Status:** done
 - **Depends on:** P1.3
 - **Gate:** in-game
 - **Scope:** Unity derives `rb.inertiaTensor` from colliders assuming uniform
