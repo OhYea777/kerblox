@@ -108,6 +108,36 @@ Log lines: `[Kerblox] Build mode on for kerbloxBlockGrid` and `[Kerblox] Build m
 | `NullReferenceException` with `ModuleBlockGrid` in the stack | A bug. Send the stack from `Player.log`. |
 | `[Kerblox] Drag cube for kerbloxBlockGrid: size ..., areas [...]` | Normal: a drag cube was rendered, once in the VAB when attached to the root and once on entering flight. |
 
+## P2.2: attached parts follow grid edits
+
+Needs a way to edit a grid in the VAB, i.e. P2.3's build mode. Before each
+edit, note where the existing blocks are against the VAB background grid. After
+each edit run `scripts/ksp-logs.sh`: every compensation logs a
+`[Kerblox] Moved ...` line.
+
+Build: Kerblox grid as the **root**, a stock tank on its top node, a stock
+engine on its bottom node, and a radial part (e.g. a fin or a small RCS thruster)
+surface-attached to the side of the solid iron base (bottom layer), with symmetry off.
+
+| Check | Expected |
+| --- | --- |
+| Add a block above the top layer (grow +Y) | Existing blocks don't move. The tank rises one block (0.625 m) and stays on the node. Engine and fin don't move. |
+| Add a block below the bottom layer (grow -Y) | Existing blocks don't move. The engine drops one block. Tank and fin don't move. |
+| Add a block beside the grid (grow ±X, then ±Z) | Existing blocks don't move. Tank and engine shift half a block sideways with the nodes, which stay centred on the widened grid. The fin doesn't move. |
+| Remove the block directly under the fin | The fin slides inward one block onto the next solid block and stays attached: picking up the grid takes the fin with it. `[Kerblox] ... slid 1 block(s)` in the log. |
+| Attach a second fin to the hollow stone wall and remove the block under it | Nothing solid is directly behind it (the capsule is hollow), so the fin stays where it was and the log warns `lost its block ... left in place`. |
+| Remove the whole top layer | The tank drops onto the new top face. |
+
+Now make the Kerblox grid a **child**: a stock probe core as root, the grid on
+its bottom node via the grid's top node.
+
+| Check | Expected |
+| --- | --- |
+| Grow the grid downward | The grid stays attached under the probe core; its bottom (and the engine on it) moves down one block. |
+| Grow the grid upward | The grid stays attached; existing blocks and the engine move down one block (the top node stays at the probe core). |
+| Offset tool reset (Offset gizmo, then reset) on the tank after an edit | The tank snaps to its node, not to where it was before the edit. |
+| Save and reload the craft after edits | Parts load at their moved positions, still attached. |
+
 ## Reporting back
 
 Paste the output of `scripts/ksp-logs.sh` and note each failing row in the

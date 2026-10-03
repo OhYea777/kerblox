@@ -77,7 +77,19 @@ to `ilspycmd -p` output and are only a rough guide.
 | --- | --- |
 | `AttachNode` has public `id`, `position`, `originalPosition`, `orientation`, `size` | Verified |
 | `Part.FindAttachNode(string)` exists | Verified by compile |
-| Moving a node with a part attached doesn't move that part | Unverified (Procedural Parts moves attached parts manually, see P2.2) |
+| `AttachNode` also has public `attachedPart`, `owner`, `nodeType` (`Stack`/`Surface`/`Dock`), `offset` and `nodeTransform` | Verified (`AttachNode`) |
+| `Part.attachNodes` (`List<AttachNode>`), `srfAttachNode`, `parent`, `children`, `attachMode` (`AttachModes.STACK`/`SRF_ATTACH`) are public fields | Verified (`Part` ~lines 1981-2507) |
+| `Part.FindAttachNodeByPart(p)` scans `attachNodes`, then returns `srfAttachNode` if *its* `attachedPart` is `p`; it dereferences `srfAttachNode` without a null check, so `AttachmentKeeper` scans `attachNodes` itself | Verified (`Part.FindAttachNodeByPart`) |
+| `srfAttachNode` is the `node_attach` node (`FindAttachNode("attach")`, or `"srfAttach"`); a part without one has none | Verified (`Part` ~line 17626, `PartLoader` ~line 3888) |
+| Editor attach (`EditorLogic.attachPart`): `part.setParent(parent)`, `part.transform.parent = parent.transform`, `callerPartNode.attachedPart = parent`, `otherPartNode.attachedPart = part`, then `attPos0 = transform.localPosition`, `attRotation0 = localRotation` | Verified |
+| So in the editor every attached part's transform is a child of its parent part's transform: moving a part carries its subtree | Verified (`attachPart`); in-game, P2.2 |
+| For surface attach the caller node is the child's `srfAttachNode` and `otherPartNode` is null: the parent's nodes don't reference surface children | Verified (`EditorLogic` ~line 11086) |
+| Surface attach placement: `attachment.rotation = LookRotation(hit.normal, parentUp) * LookRotation(srfAttachNode.orientation, up)`, `attachment.position = hit.point - attachment.rotation * attRotation * srfAttachNode.position`, part rotation = `attachment.rotation * attRotation`. So the hit point is `transform.TransformPoint(srfAttachNode.position)` at unit scale, and the surface normal can be recovered from the rotation | Verified (`EditorLogic` ~lines 11092, 3869) |
+| Stack attach point is `parent.transform.TransformPoint(node.position + node.offset)` | Verified (`EditorLogic` ~line 10778) |
+| `attPos` is the offset-tool offset, `localPosition - attPos0`; offset "reset" sets `localPosition = attPos0`. Both are written to craft files (`ShipConstruct`), so code that moves an attached part must also move `attPos0` | Verified (`EditorLogic` ~lines 7533, 7616; `ShipConstruct` ~line 263) |
+| Setting `AttachNode.position` doesn't move the part attached there | Verified (plain field; Procedural Parts moves attached parts itself, see below) |
+| Procedural Parts (`ProceduralAbstractShape`, 2026-10): on a length change it moves each stack node; if the node's part is a child it translates it by the node delta, if it's the parent it translates itself by the negated delta. Surface children are moved with `MovePartByAttachNode`, which translates `node.owner.transform` by the world delta of the attach point. It doesn't update `attPos0` | Read from GitHub source, not a KSP fact |
+| Moved parts stay attached, render in place, and save/load at the new positions | In-game, P2.2 |
 
 ## Editor input and build mode (P2.3)
 

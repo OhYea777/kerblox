@@ -164,9 +164,9 @@ namespace Kerblox
         /// (old (x,y,z) is now at (x+ShiftX, ...)), and
         /// <c>edit.Displacement(blockSize)</c> is how far the pre-existing blocks moved
         /// in this part's local space, in metres, because <see cref="BlockLayout"/>
-        /// re-centres the grid on the part origin. Nothing is moved to compensate: the
-        /// part transform, attach nodes' attached parts and children stay where they
-        /// were. Keeping blocks fixed in world space is the listener's job (P2.2).
+        /// re-centres the grid on the part origin. By the time this fires,
+        /// <see cref="AttachmentKeeper"/> has already moved this part and its children
+        /// to compensate (see its policy), so listeners must not move them again.
         /// </summary>
         public event Action<ModuleBlockGrid, GridEdit> GridResized;
 
@@ -199,6 +199,9 @@ namespace Kerblox
                 return new GridEdit(GridEditStatus.NoChange, grid, grid.SizeX, grid.SizeY, grid.SizeZ);
             }
 
+            // Before the edit: Edited changes mutate the grid in place, and surface
+            // contacts are found on the grid as it was.
+            AttachmentKeeper keeper = AttachmentKeeper.Capture(part, grid, Registry, blockSize);
             GridEdit edit = GridEditor.SetBlock(grid, x, y, z, state);
             if (edit.Status == GridEditStatus.TooLarge)
                 Log.Warn($"Grid edit at ({x},{y},{z}) would exceed {VoxelGrid.MaxDimension} blocks per axis");
@@ -208,6 +211,7 @@ namespace Kerblox
             gridData = GridCodec.ToText(grid);
             Rebuild();          // also sets dragCubeDirty; FixedUpdate re-renders once the editor is ready
             part.UpdateMass();  // GetModuleMass is only polled, so push the new mass now
+            keeper.Apply(edit, Registry, blockSize);   // nodes have moved; carry attached parts with them
 
             if (edit.Resized)
             {
@@ -380,21 +384,21 @@ namespace Kerblox
         /// <summary>
         /// Keep the stack nodes on the top and bottom faces of the occupied blocks,
         /// centred on the part axis. Surface attachment uses colliders and needs nothing here.
+        /// Moving a node doesn't move the part on it; after an edit <see cref="AttachmentKeeper"/> does.
         /// </summary>
         private void UpdateAttachNodes()
         {
-            if (massProps.SolidBlocks == 0) return;
-            SetNodeY("top", massProps.BoundsMax.Y);
-            SetNodeY("bottom", massProps.BoundsMin.Y);
+            StackNodes nodes = StackNodes.From(massProps);
+            if (!nodes.Valid) return;
+            SetNode("top", nodes.Top);
+            SetNode("bottom", nodes.Bottom);
         }
 
-        private void SetNodeY(string id, float y)
+        private void SetNode(string id, Float3 p)
         {
             AttachNode node = part.FindAttachNode(id);
             if (node == null) return;
-            var pos = new Vector3(0f, y, 0f);
-            // Moving a node with something attached would also need to move that part;
-            // that matters once the grid is editable (phase 2), not for a fixed grid.
+            var pos = new Vector3(p.X, p.Y, p.Z);
             node.position = pos;
             node.originalPosition = pos;
         }
