@@ -138,6 +138,97 @@ its bottom node via the grid's top node.
 | Offset tool reset (Offset gizmo, then reset) on the tank after an edit | The tank snaps to its node, not to where it was before the edit. |
 | Save and reload the craft after edits | Parts load at their moved positions, still attached. |
 
+## P2.4: undo, symmetry and craft round-trip
+
+Build mode records one editor undo step when it closes. Undo and redo reload
+the whole craft from a saved snapshot, which rebuilds each grid from its
+`gridData` (`OnLoad`). Edits in build mode apply to every symmetry counterpart:
+radial counterparts get the same cell, mirror counterparts the mirror-image cell.
+After each section run `scripts/ksp-logs.sh`; there should be no exceptions and
+no `[Kerblox] Can't relate ... mirror counterpart` warnings.
+
+### Undo and redo (VAB)
+
+Kerblox grid as the root, a stock tank on its top node.
+
+| Check | Expected |
+| --- | --- |
+| Build blocks, place three blocks, **Done**, then Ctrl+Z | All three blocks disappear in one step. PAW Blocks and mass return to their old values and the button reads **Build blocks** (not Stop building). |
+| Ctrl+Y (redo) | The three blocks come back. |
+| Build blocks, add a block above the top layer (the tank rises), **Done**, Ctrl+Z | The grid shrinks back and the tank returns to the top node, still attached. |
+| Two build sessions in a row, then Ctrl+Z twice | The first Ctrl+Z undoes only the second session; the second undoes the first. |
+| Ctrl+Z while build mode is open | Nothing happens (undo is locked while building). |
+
+### Radial symmetry (VAB)
+
+A large stock tank (e.g. Rockomax X200-32) as the root. With 4x radial symmetry,
+surface-attach four Kerblox grids to its side.
+
+| Check | Expected |
+| --- | --- |
+| Build blocks on one grid; place a block on its outward face | All four grids get the block in the same place relative to the tank: the craft stays 4-way symmetric. |
+| Shift+click a block on one grid | That block disappears on all four. |
+| Grow one grid upward and sideways | All four grow the same way; existing blocks don't move and all four stay attached to the tank. |
+| Attach a winglet to one grid with symmetry, then edit under it | Every grid's winglet follows (P2.2), one per grid. |
+| **Done**, then Ctrl+Z | One undo step reverts all four grids. |
+
+### Mirror symmetry (SPH)
+
+A Mk1 fuselage as the root. With mirror symmetry, surface-attach two Kerblox
+grids to its left and right sides. Then repeat with grids rotated before
+placing (rotate the held part with W/S/A/D/Q/E).
+
+| Check | Expected |
+| --- | --- |
+| Build blocks on the left grid; place a block on one corner, toward the nose | The right grid gets one on the mirror-image corner, also toward the nose: seen from above, the craft is mirror-symmetric about the fuselage. |
+| Place a block on its outward face (away from the fuselage) | The right grid grows outward too, not toward the fuselage. |
+| Remove a block, then grow along the fuselage axis | Mirrored on the other grid both times; both stay attached. |
+| Same checks with the rotated grids | Still mirror images. If not, the log has a `Can't relate` warning or the wrong side changed: report which. |
+
+Blocks with a facing (e.g. an eyedropped stair) are copied with the same
+facing, not turned to match the mirror. That is expected for now.
+
+### Save and load
+
+| Check | Expected |
+| --- | --- |
+| Save each craft above, go to the Space Center, come back and load it | Same shapes, masses and attachments. |
+| After loading, edit one grid of a symmetric set | All counterparts still change together (symmetry survives the round trip). |
+| Launch the radial craft, then revert to the VAB | Same shapes. |
+| In flight, F5 then F9 | Same shapes. |
+
+### Maximum gridData length
+
+`gridData` has no length limit in KSP's file format (see
+[KSP-API-NOTES.md](KSP-API-NOTES.md)); this checks how big a grid the game
+handles. Generate worst-case crafts (64³ cubes of noise that defeat the codec's
+run-length encoding):
+
+```sh
+scripts/stress-crafts.sh            # writes to ~/.cache/kerblox/stress-crafts
+scripts/stress-crafts.sh "" 64,128  # also 128³ (14 MB craft files)
+```
+
+Copy the `.craft` files into `saves/<your save>/Ships/VAB/` yourself.
+
+| Craft | gridData | File |
+| --- | --- | --- |
+| `Kerblox stress 64-4` (4 block types) | 699,191 chars | 0.7 MB |
+| `Kerblox stress 64-65535` (65,535 block states, the palette limit) | 4,855,584 chars | 4.9 MB |
+| `Kerblox stress 128-4` | 5,592,546 chars | 5.6 MB |
+| `Kerblox stress 128-65535` | 14,025,316 chars | 14 MB |
+
+| Check | Expected |
+| --- | --- |
+| Open the VAB Load menu | The stress crafts are listed. Note how long the list takes to appear. |
+| Load `Kerblox stress 64-4` | A solid 40 m cube of mixed stone, planks, iron and wool. PAW Blocks: **262,144**. Note the load time. |
+| Load `Kerblox stress 64-65535` | Same cube shape and block count. Note the load time. |
+| On either: place one block (build mode), **Done**, Ctrl+Z, Ctrl+Y | Works; note any hitch per step (each undo step stores a full copy of `gridData`). |
+| Save it under a new name, reload it | Same cube. The new file is about the same size as the generated one. |
+| (Optional) the 128³ crafts | Note load time and memory; failures here set the practical grid size limit for P2.5. |
+
+Report the load times; they decide whether P2.5 needs to cap grid size.
+
 ## Reporting back
 
 Paste the output of `scripts/ksp-logs.sh` and note each failing row in the

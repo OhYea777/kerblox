@@ -23,8 +23,11 @@ namespace Kerblox
     ///    or surface-attached to its parent) the pre-existing blocks stay fixed in world space.
     ///  - Stack-attached children follow their node.
     ///  - Surface-attached children follow their block, and slide inward if it was removed.
-    /// Symmetry counterparts are separate parts with their own grids and are not touched
-    /// (editing them together is P2.4).
+    /// Symmetry counterparts are separate parts with their own grids and keepers:
+    /// <see cref="ModuleBlockGrid.SetBlockWithSymmetry"/> edits each one, and each
+    /// edit's keeper moves only that part and its children. The policy is symmetric
+    /// (it never depends on which side of the craft a part is on), so counterparts
+    /// stay radial or mirror images of each other.
     /// </summary>
     internal sealed class AttachmentKeeper
     {

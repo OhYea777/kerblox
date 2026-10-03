@@ -9,7 +9,9 @@ namespace Kerblox
     /// The editor's block placement tool, toggled from a <see cref="ModuleBlockGrid"/>'s
     /// PAW. While it exists, left click places the palette block on the face under the
     /// mouse, Shift+click removes the block under the mouse and Ctrl+click picks it into
-    /// the palette. At most one part is in build mode at a time.
+    /// the palette. At most one part is in build mode at a time. Edits also apply to
+    /// the part's symmetry counterparts (<see cref="ModuleBlockGrid.SetBlockWithSymmetry"/>),
+    /// and the whole session is one editor undo step.
     ///
     /// Lives on the part's GameObject, so deleting the part or leaving the scene
     /// destroys it, and <see cref="OnDestroy"/> is where every input lock, the ghost
@@ -169,7 +171,7 @@ namespace Kerblox
 
         private void Place(Int3 c)
         {
-            GridEdit e = module.SetBlock(c.X, c.Y, c.Z, selected);
+            GridEdit e = module.SetBlockWithSymmetry(c.X, c.Y, c.Z, selected);
             if (e.Status == GridEditStatus.TooLarge) status = $"Grid can't grow past {VoxelGrid.MaxDimension} blocks";
             else if (e.Changed) { edited = true; status = ""; }
         }
@@ -183,7 +185,7 @@ namespace Kerblox
                 status = "Can't remove the last block";
                 return;
             }
-            if (module.RemoveBlock(c.X, c.Y, c.Z).Changed) { edited = true; status = ""; }
+            if (module.SetBlockWithSymmetry(c.X, c.Y, c.Z, BlockState.Air).Changed) { edited = true; status = ""; }
         }
 
         private void Eyedrop(Int3 c)

@@ -148,7 +148,7 @@ Goal: place and remove blocks on the grid part inside the VAB/SPH.
 - **Acceptance:** place/remove blocks with mouse; part pickup unaffected outside build mode.
 
 ### P2.4: Undo, symmetry and craft round-trip
-- **Status:** todo
+- **Status:** review
 - **Depends on:** P2.3
 - **Gate:** in-game
 - **Scope:** confirm editor undo/redo restores grids (it snapshots craft
